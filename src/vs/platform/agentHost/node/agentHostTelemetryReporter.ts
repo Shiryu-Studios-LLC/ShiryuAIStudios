@@ -9,6 +9,7 @@ import { AgentSession } from '../common/agentService.js';
 import type { MessageAttachment } from '../common/state/protocol/state.js';
 import { isAhpChatChannel, isSubagentSession, parseRequiredSessionUriFromChatUri, type ISessionWithDefaultChat } from '../common/state/sessionState.js';
 import type { ToolInvokedResult } from './agentHostToolCallTracker.js';
+import { multiplexProperties, type IAgentHostRestrictedTelemetry } from './agentHostRestrictedTelemetry.js';
 
 export type AgentHostUserMessageSentSource = 'direct' | 'queued';
 
@@ -85,6 +86,12 @@ export class AgentHostTelemetryReporter {
 
 	constructor(private readonly _telemetryService: ITelemetryService) { }
 
+	/** The restricted GH/MSFT telemetry surface, present when the agent-host telemetry service is wired. */
+	private get _restricted(): IAgentHostRestrictedTelemetry | undefined {
+		const ts = this._telemetryService as Partial<IAgentHostRestrictedTelemetry>;
+		return typeof ts.sendEnhancedGHTelemetryEvent === 'function' ? ts as IAgentHostRestrictedTelemetry : undefined;
+	}
+
 	userMessageSent(provider: string, session: string, sessionState: ISessionWithDefaultChat | undefined, source: AgentHostUserMessageSentSource, attachments: readonly MessageAttachment[] | undefined): void {
 		const attachmentCount = attachments?.length ?? 0;
 		const activeClients = sessionState?.activeClients ?? [];
@@ -102,6 +109,21 @@ export class AgentHostTelemetryReporter {
 			} : {}),
 			attachmentCount,
 		});
+
+		// Mirror the Copilot extension's enhanced GH `request.options.tools` event as closely as
+		// the agent-host flow allows: same event name and `{ conversationId, messagesJson }` shape
+		// (messagesJson = the raw tool definitions JSON, multiplexed across ~8192-char chunks like
+		// the extension), so it lands identically downstream. Note: the extension emits this per
+		// LLM request with a `headerRequestId`; the agent host only sees the user turn, so this
+		// fires once per message and has no per-request id.
+		const restricted = this._restricted;
+		if (restricted && activeClients.length > 0) {
+			const tools = activeClients.flatMap(client => client.tools);
+			restricted.sendEnhancedGHTelemetryEvent('request.options.tools', multiplexProperties({
+				conversationId: AgentSession.id(sessionUri),
+				messagesJson: JSON.stringify(tools),
+			}));
+		}
 	}
 
 	turnCompleted(report: IAgentHostTurnCompletedReport): void {
