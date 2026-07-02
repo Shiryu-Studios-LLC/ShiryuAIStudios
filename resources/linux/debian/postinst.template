@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Shiryu AI Studios. All rights reserved.
 # Licensed under the MIT License. See License.txt in the project root for license information.
 
 # Symlink bin command to /usr/bin
@@ -22,7 +22,7 @@ if hash update-mime-database 2>/dev/null; then
 	update-mime-database /usr/share/mime
 fi
 
-if [ "@@NAME@@" != "code-oss" ]; then
+if [ "@@NAME@@" != "shiryu-ai-studio" ]; then
 	# Remove the legacy bin command if this is the stable build
 	if [ "@@NAME@@" = "code" ]; then
 		rm -f /usr/local/bin/code
