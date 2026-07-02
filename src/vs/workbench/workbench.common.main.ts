@@ -227,6 +227,10 @@ import './contrib/chat/browser/chat.contribution.js';
 import './contrib/chat/browser/chat.view.contribution.js';
 import './contrib/inlineChat/browser/inlineChat.contribution.js';
 
+// Shiryu AI Studio — Local AI inference via llama.cpp
+import './contrib/shiryuAi/common/shiryuAi.contribution.js';
+import './contrib/shiryuAi/browser/shiryuAi.contribution.js';
+
 // Copilot Voice
 import './contrib/agentsVoice/browser/agentsVoice.contribution.js';
 import './contrib/mcp/browser/mcp.contribution.js';
