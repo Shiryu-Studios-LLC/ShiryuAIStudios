@@ -10,6 +10,8 @@ import { IChatAgentData, IChatAgentImplementation, IChatAgentRequest, IChatAgent
 import { IChatProgress, IChatMarkdownContent, IChatFollowup } from '../../chat/common/chatService/chatService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../chat/common/constants.js';
 import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
+import { Registry } from '../../../../platform/registry/common/platform.js';
+import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IShiryuAiService } from '../common/shiryuAiService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
@@ -326,5 +328,48 @@ registerWorkbenchContribution2(
 	ShiryuAiContribution,
 	WorkbenchPhase.BlockRestore
 );
+
+//#region Configuration
+
+const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
+configurationRegistry.registerConfiguration({
+	id: 'shiryuAi',
+	title: 'Shiryu AI Studio',
+	type: 'object',
+	properties: {
+		'shiryuAi.modelPath': {
+			type: 'string',
+			default: '',
+			description: 'Path to the GGUF model file for local inference. Leave empty to load via slash command.',
+		},
+		'shiryuAi.contextSize': {
+			type: 'number',
+			default: 4096,
+			minimum: 512,
+			maximum: 131072,
+			description: 'Context window size in tokens. Larger values use more memory.',
+		},
+		'shiryuAi.gpuLayers': {
+			type: 'number',
+			default: -1,
+			minimum: -1,
+			description: 'Number of GPU layers to offload (-1 = all, 0 = CPU only).',
+		},
+		'shiryuAi.temperature': {
+			type: 'number',
+			default: 0.7,
+			minimum: 0,
+			maximum: 2,
+			description: 'Sampling temperature. Higher = more random, lower = more deterministic.',
+		},
+		'shiryuAi.maxTokens': {
+			type: 'number',
+			default: 2048,
+			minimum: 64,
+			maximum: 32768,
+			description: 'Maximum number of tokens to generate per response.',
+		},
+	},
+});
 
 //#endregion

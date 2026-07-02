@@ -1,0 +1,2 @@
+# GGUF model files are too large for git
+*.gguf
