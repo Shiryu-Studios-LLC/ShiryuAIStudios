@@ -458,10 +458,10 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
 		let web: NodeJS.ReadWriteStream[] = [];
 		if (type === 'reh-web') {
 			web = [
-				'resources/server/favicon.ico',
-				'resources/server/code-192.png',
-				'resources/server/code-512.png',
-				'resources/server/manifest.json'
+			'resources/server/favicon.ico',
+			'resources/server/shiryu-ai-studio-192.png',
+			'resources/server/shiryu-ai-studio-512.png',
+			'resources/server/manifest.json'
 			].map(resource => gulp.src(resource, { base: '.' }).pipe(rename(resource)));
 		}
 

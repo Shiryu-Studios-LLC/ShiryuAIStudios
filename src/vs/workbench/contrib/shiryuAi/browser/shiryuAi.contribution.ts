@@ -15,6 +15,8 @@ import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '.
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IShiryuAiService } from '../common/shiryuAiService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ChatConfiguration } from '../../chat/common/constants.js';
 
 //#region Agent Data
 
@@ -290,6 +292,7 @@ class ShiryuAiContribution extends Disposable {
 		@IShiryuAiService private readonly shiryuAiService: IShiryuAiService,
 		@IChatAgentService private readonly chatAgentService: IChatAgentService,
 		@ILogService private readonly logService: ILogService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
 	}
@@ -313,7 +316,33 @@ class ShiryuAiContribution extends Disposable {
 		this._disposables.add(disposable);
 		this._registered = true;
 
+		// Sync Copilot enablement: when shiryuAi.enableCopilot changes,
+		// update chat.disableAIFeatures accordingly.
+		this._syncCopilotState();
+		this._disposables.add(
+			this.configurationService.onDidChangeConfiguration(e => {
+				if (e.affectsConfiguration('shiryuAi.enableCopilot')) {
+					this._syncCopilotState();
+				}
+			})
+		);
+
 		this.logService.info('[ShiryuAI] Agent registered successfully');
+	}
+
+	private _syncCopilotState(): void {
+		const copilotEnabled = this.configurationService.getValue<boolean>('shiryuAi.enableCopilot') === true;
+		const currentDisabled = this.configurationService.getValue<boolean>(ChatConfiguration.AIDisabled) === true;
+
+		// If user enables Copilot, turn off the disable flag
+		// If user disables Copilot (default), turn on the disable flag
+		if (copilotEnabled && currentDisabled) {
+			this.configurationService.updateValue(ChatConfiguration.AIDisabled, false);
+			this.logService.info('[ShiryuAI] Copilot re-enabled via shiryuAi.enableCopilot');
+		} else if (!copilotEnabled && !currentDisabled) {
+			this.configurationService.updateValue(ChatConfiguration.AIDisabled, true);
+			this.logService.info('[ShiryuAI] Copilot disabled (Shiryu AI is the primary AI)');
+		}
 	}
 
 	override dispose(): void {
@@ -368,6 +397,11 @@ configurationRegistry.registerConfiguration({
 			minimum: 64,
 			maximum: 32768,
 			description: 'Maximum number of tokens to generate per response.',
+		},
+		'shiryuAi.enableCopilot': {
+			type: 'boolean',
+			default: false,
+			description: 'Re-enable GitHub Copilot as a secondary AI provider. When disabled (default), only Shiryu AI is available. Restart required after changing.',
 		},
 	},
 });

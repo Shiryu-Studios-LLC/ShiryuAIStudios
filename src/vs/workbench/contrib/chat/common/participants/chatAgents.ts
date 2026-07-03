@@ -455,15 +455,18 @@ export class ChatAgentService extends Disposable implements IChatAgentService {
 	}
 
 	getContributedDefaultAgent(location: ChatAgentLocation): IChatAgentData | undefined {
-		return this._preferExtensionAgent(this.getAgents().filter(a => !!a.isDefault && a.locations.includes(location)));
+		return this._preferCoreAgent(this.getAgents().filter(a => !!a.isDefault && a.locations.includes(location)));
+	}
+
+	private _preferCoreAgent<T extends IChatAgentData>(agents: T[]): T | undefined {
+		// Shiryu AI Studio: prefer core agents (Shiryu AI) over extension agents (Copilot).
+		return findLast(agents, agent => agent.isCore) ?? agents.at(-1);
 	}
 
 	private _preferExtensionAgent<T extends IChatAgentData>(agents: T[]): T | undefined {
-		// We potentially have multiple agents on the same location,
-		// contributed from core and from extensions.
-		// This method will prefer the last extensions provided agent
-		// falling back to the last core agent if no extension agent is found.
-		return findLast(agents, agent => !agent.isCore) ?? agents.at(-1);
+		// Shiryu AI Studio: prefer core agents (Shiryu AI) over extension agents (Copilot).
+		// Core agents are the primary AI; extension agents are secondary/optional.
+		return findLast(agents, agent => agent.isCore) ?? agents.at(-1);
 	}
 
 	getAgent(id: string, includeDisabled = false): IChatAgentData | undefined {
@@ -509,12 +512,9 @@ export class ChatAgentService extends Disposable implements IChatAgentService {
 	}
 
 	private _preferExtensionAgents<T extends IChatAgentData>(agents: T[]): T[] {
-		// We potentially have multiple agents on the same location,
-		// contributed from core and from extensions.
-		// This method will prefer the extensions provided agents
-		// falling back to the original agents array extension agent is found.
-		const extensionAgents = agents.filter(a => !a.isCore);
-		return extensionAgents.length > 0 ? extensionAgents : agents;
+		// Shiryu AI Studio: prefer core agents (Shiryu AI) over extension agents (Copilot).
+		const coreAgents = agents.filter(a => a.isCore);
+		return coreAgents.length > 0 ? coreAgents : agents;
 	}
 
 	agentHasDupeName(id: string): boolean {

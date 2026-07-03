@@ -1,20 +1,20 @@
 {
-	"name": "Code - OSS",
-	"short_name": "Code- OSS",
+	"name": "Shiryu AI Studio",
+	"short_name": "Shiryu AI",
 	"start_url": "/",
 	"lang": "en-US",
 	"display": "standalone",
 	"display_override": ["window-controls-overlay"],
 	"icons": [
-		{
-			"src": "code-192.png",
-			"type": "image/png",
-			"sizes": "192x192"
-		},
-		{
-			"src": "code-512.png",
-			"type": "image/png",
-			"sizes": "512x512"
-		}
+	{
+		"src": "shiryu-ai-studio-192.png",
+		"type": "image/png",
+		"sizes": "192x192"
+	},
+	{
+		"src": "shiryu-ai-studio-512.png",
+		"type": "image/png",
+		"sizes": "512x512"
+	}
 	]
 }
