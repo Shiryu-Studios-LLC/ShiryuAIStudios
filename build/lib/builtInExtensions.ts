@@ -79,7 +79,7 @@ function getExtensionDownloadStream(extension: IExtensionDefinition) {
 		input = ext.fromGithub(extension);
 	}
 
-	return input.pipe(rename(p => p.dirname = `${extension.name}/${p.dirname}`));
+	return input.pipe(rename(p => { p.dirname = `${extension.name}/${p.dirname}`; return p; }));
 }
 
 export function getExtensionStream(extension: IExtensionDefinition) {
@@ -87,7 +87,7 @@ export function getExtensionStream(extension: IExtensionDefinition) {
 	if (isUpToDate(extension)) {
 		log('[extensions]', `${extension.name}@${extension.version} up to date`, ansiColors.green('✔︎'));
 		return vfs.src(['**'], { cwd: getExtensionPath(extension), dot: true })
-			.pipe(rename(p => p.dirname = `${extension.name}/${p.dirname}`));
+			.pipe(rename(p => { p.dirname = `${extension.name}/${p.dirname}`; return p; }));
 	}
 
 	return getExtensionDownloadStream(extension);
