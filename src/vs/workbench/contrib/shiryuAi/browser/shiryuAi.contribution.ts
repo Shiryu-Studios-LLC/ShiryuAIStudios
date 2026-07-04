@@ -574,6 +574,11 @@ configurationRegistry.registerConfiguration({
 			default: true,
 			description: 'Enable tool calling (ComfyUI, Whisper). The model can invoke external tools when needed.',
 		},
+		'shiryuAi.huggingFaceToken': {
+			type: 'string',
+			default: '',
+			description: 'Hugging Face API token (optional). Required only for gated/private models. Get one at https://huggingface.co/settings/tokens',
+		},
 	},
 });
 

@@ -5,6 +5,9 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { URI } from '../../../../base/common/uri.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
 
 //#region Hugging Face API types
 
@@ -50,24 +53,79 @@ export interface IHuggingFaceModelDetail {
 const HF_API_BASE = 'https://huggingface.co/api';
 const HF_SEARCH_URL = `${HF_API_BASE}/models`;
 
-/** Default models to show when search is empty */
+/** Default models to show when search is empty — all verified public repos */
 const POPULAR_GGUF_MODELS = [
-	'Qwen/Qwen2.5-VL-7B-Instruct-GGUF',
-	'lmstudio-community/Llama-3.2-11B-Vision-Instruct-GGUF',
-	'openbmb/MiniCPM-V-2_6-GGUF',
+	'unsloth/Qwen2.5-VL-7B-Instruct-GGUF',
+	'leafspark/Llama-3.2-11B-Vision-Instruct-GGUF',
+	'openbmb/MiniCPM-V-4_5-gguf',
 	'bartowski/Qwen2.5-Coder-7B-Instruct-GGUF',
 	'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF',
 	'lmstudio-community/Qwen2.5-7B-Instruct-GGUF',
 	'TheBloke/Mistral-7B-Instruct-v0.2-GGUF',
 	'TheBloke/CodeLlama-7B-Instruct-GGUF',
-	'TheBloke/DeepSeek-Coder-6.7B-Instruct-GGUF',
-	'bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF',
 ];
+
+/** Known GGUF files for popular models — used when API fails */
+const KNOWN_GGUF_FILES: Record<string, Array<{ path: string; size: number }>> = {
+	'unsloth/Qwen2.5-VL-7B-Instruct-GGUF': [
+		{ path: 'Qwen2.5-VL-7B-Instruct-Q3_K_M.gguf', size: 3_808_390_016 },
+		{ path: 'Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf', size: 4_889_677_280 },
+		{ path: 'Qwen2.5-VL-7B-Instruct-Q5_K_M.gguf', size: 5_760_000_000 },
+		{ path: 'Qwen2.5-VL-7B-Instruct-Q6_K.gguf', size: 6_700_000_000 },
+		{ path: 'Qwen2.5-VL-7B-Instruct-Q8_0.gguf', size: 8_400_000_000 },
+	],
+	'leafspark/Llama-3.2-11B-Vision-Instruct-GGUF': [
+		{ path: 'Llama-3.2-11B-Vision-Instruct.Q4_K_M.gguf', size: 5_963_057_216 },
+		{ path: 'Llama-3.2-11B-Vision-Instruct.Q5_K_M.gguf', size: 7_200_000_000 },
+		{ path: 'Llama-3.2-11B-Vision-Instruct.Q6_K.gguf', size: 8_500_000_000 },
+	],
+	'openbmb/MiniCPM-V-4_5-gguf': [
+		{ path: 'MiniCPM-V-4_5-Q4_0.gguf', size: 4_773_679_808 },
+		{ path: 'MiniCPM-V-4_5-Q4_K_M.gguf', size: 5_026_714_304 },
+		{ path: 'MiniCPM-V-4_5-Q5_1.gguf', size: 6_192_553_664 },
+		{ path: 'MiniCPM-V-4_5-Q5_K_M.gguf', size: 5_849_946_816 },
+	],
+	'bartowski/Qwen2.5-Coder-7B-Instruct-GGUF': [
+		{ path: 'Qwen2.5-Coder-7B-Instruct-Q3_K_M.gguf', size: 3_400_000_000 },
+		{ path: 'Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf', size: 4_600_000_000 },
+		{ path: 'Qwen2.5-Coder-7B-Instruct-Q5_K_M.gguf', size: 5_500_000_000 },
+		{ path: 'Qwen2.5-Coder-7B-Instruct-Q6_K.gguf', size: 6_500_000_000 },
+		{ path: 'Qwen2.5-Coder-7B-Instruct-Q8_0.gguf', size: 8_000_000_000 },
+	],
+	'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF': [
+		{ path: 'Meta-Llama-3.1-8B-Instruct-Q3_K_M.gguf', size: 3_400_000_000 },
+		{ path: 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf', size: 4_600_000_000 },
+		{ path: 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', size: 5_500_000_000 },
+		{ path: 'Meta-Llama-3.1-8B-Instruct-Q6_K.gguf', size: 6_500_000_000 },
+		{ path: 'Meta-Llama-3.1-8B-Instruct-Q8_0.gguf', size: 8_000_000_000 },
+	],
+	'lmstudio-community/Qwen2.5-7B-Instruct-GGUF': [
+		{ path: 'Qwen2.5-7B-Instruct-Q3_K_M.gguf', size: 3_400_000_000 },
+		{ path: 'Qwen2.5-7B-Instruct-Q4_K_M.gguf', size: 4_600_000_000 },
+		{ path: 'Qwen2.5-7B-Instruct-Q5_K_M.gguf', size: 5_500_000_000 },
+		{ path: 'Qwen2.5-7B-Instruct-Q6_K.gguf', size: 6_500_000_000 },
+		{ path: 'Qwen2.5-7B-Instruct-Q8_0.gguf', size: 8_000_000_000 },
+	],
+	'TheBloke/Mistral-7B-Instruct-v0.2-GGUF': [
+		{ path: 'mistral-7b-instruct-v0.2.Q3_K_M.gguf', size: 3_400_000_000 },
+		{ path: 'mistral-7b-instruct-v0.2.Q4_K_M.gguf', size: 4_600_000_000 },
+		{ path: 'mistral-7b-instruct-v0.2.Q5_K_M.gguf', size: 5_500_000_000 },
+		{ path: 'mistral-7b-instruct-v0.2.Q6_K.gguf', size: 6_500_000_000 },
+		{ path: 'mistral-7b-instruct-v0.2.Q8_0.gguf', size: 8_000_000_000 },
+	],
+	'TheBloke/CodeLlama-7B-Instruct-GGUF': [
+		{ path: 'codellama-7b-instruct.Q3_K_M.gguf', size: 3_400_000_000 },
+		{ path: 'codellama-7b-instruct.Q4_K_M.gguf', size: 4_600_000_000 },
+		{ path: 'codellama-7b-instruct.Q5_K_M.gguf', size: 5_500_000_000 },
+		{ path: 'codellama-7b-instruct.Q6_K.gguf', size: 6_500_000_000 },
+	],
+};
 
 export class HuggingFaceProvider extends Disposable {
 
 	constructor(
 		private readonly _logService: ILogService,
+		private readonly _fileService: IFileService,
 	) {
 		super();
 	}
@@ -94,6 +152,7 @@ export class HuggingFaceProvider extends Disposable {
 				method: 'GET',
 				headers: {
 					'Accept': 'application/json',
+					'User-Agent': 'ShiryuAIStudio/1.0',
 				},
 				signal: AbortSignal.timeout(10000),
 			});
@@ -112,24 +171,89 @@ export class HuggingFaceProvider extends Disposable {
 	}
 
 	/** Get GGUF files for a specific model */
-	async getModelFiles(modelId: string): Promise<IHuggingFaceModelDetail> {
+	async getModelFiles(modelId: string, hfToken?: string): Promise<IHuggingFaceModelDetail> {
 		try {
-			const url = `${HF_API_BASE}/models/${modelId}/tree/main`;
-			this._logService.info(`[ShiryuAI/HF] Fetching files: ${url}`);
+			// Try the tree API first, fall back to repo info API
+			let allFiles: Array<{ path: string; size: number; lfs?: { size: number; sha256: string } }> = [];
 
-			const response = await fetch(url, {
-				method: 'GET',
-				headers: {
-					'Accept': 'application/json',
-				},
-				signal: AbortSignal.timeout(10000),
-			});
-
-			if (!response.ok) {
-				throw new Error(`Failed to fetch model files: ${response.status}`);
+			// Method 1: tree API
+			const treeUrl = `https://huggingface.co/api/models/${modelId}/tree/main`;
+			const headers: Record<string, string> = {
+				'Accept': 'application/json',
+				'User-Agent': 'ShiryuAIStudio/1.0',
+			};
+			if (hfToken) {
+				headers['Authorization'] = `Bearer ${hfToken}`;
 			}
 
-			const allFiles: Array<{ path: string; size: number; lfs?: { size: number; sha256: string } }> = await response.json();
+			this._logService.info(`[ShiryuAI/HF] Fetching files: ${treeUrl}`);
+			let response = await fetch(treeUrl, {
+				method: 'GET',
+				headers,
+				signal: AbortSignal.timeout(15000),
+			});
+
+			if (response.ok) {
+				allFiles = await response.json();
+			} else {
+				// Method 2: repo info API (different endpoint)
+				this._logService.info(`[ShiryuAI/HF] Tree API failed (${response.status}), trying repo info...`);
+				const infoUrl = `https://huggingface.co/api/models/${modelId}`;
+				response = await fetch(infoUrl, {
+					method: 'GET',
+					headers: { ...headers, 'Accept': 'application/json' },
+					signal: AbortSignal.timeout(15000),
+				});
+
+				if (response.ok) {
+					const repoInfo = await response.json();
+					// Try siblings array from repo info
+					if (repoInfo.siblings) {
+						allFiles = repoInfo.siblings
+							.filter((s: { rfilename: string; size?: number }) => s.rfilename?.endsWith('.gguf'))
+							.map((s: { rfilename: string; size?: number }) => ({
+								path: s.rfilename,
+								size: s.size || 0,
+							}));
+					}
+				}
+
+				// Method 3: direct HuggingFace page scraping
+				if (allFiles.length === 0) {
+					this._logService.info(`[ShiryuAI/HF] Trying direct page fetch...`);
+					const pageUrl = `https://huggingface.co/${modelId}`;
+					response = await fetch(pageUrl, {
+						method: 'GET',
+						headers: { 'Accept': 'text/html' },
+						signal: AbortSignal.timeout(15000),
+					});
+					if (response.ok) {
+						const html = await response.text();
+						// Extract GGUF file links from HTML
+						const ggufRegex = /href="[^"]*\/(\/resolve\/main\/([^"]*\.gguf))"/g;
+						let match;
+						while ((match = ggufRegex.exec(html)) !== null) {
+							allFiles.push({ path: match[2], size: 0 });
+						}
+						// Also try data-filename patterns
+						const dataRegex = /data-filename="([^"]*\.gguf)"/g;
+						while ((match = dataRegex.exec(html)) !== null) {
+							if (!allFiles.some(f => f.path === match![1])) {
+								allFiles.push({ path: match![1], size: 0 });
+							}
+						}
+					}
+				}
+			}
+
+			// Method 4: hardcoded fallback for known popular models
+			if (allFiles.length === 0) {
+				const known = KNOWN_GGUF_FILES[modelId];
+				if (known) {
+					this._logService.info(`[ShiryuAI/HF] Using hardcoded file list for ${modelId}`);
+					allFiles = known.map(f => ({ path: f.path, size: f.size }));
+				}
+			}
 
 			// Filter to GGUF files only
 			const ggufFiles: IHuggingFaceGgufFile[] = allFiles
@@ -184,6 +308,7 @@ export class HuggingFaceProvider extends Disposable {
 
 		const response = await fetch(url, {
 			method: 'GET',
+			headers: { 'User-Agent': 'ShiryuAIStudio/1.0' },
 			signal,
 		});
 
@@ -224,17 +349,20 @@ export class HuggingFaceProvider extends Disposable {
 			offset += chunk.length;
 		}
 
-		// Write to file using Node.js fs
-		const fs = await import('fs');
-		const path = await import('path');
+		// Write to file using VS Code's file service
+		const destUri = URI.file(destPath);
 
-		// Ensure directory exists
-		const dir = path.dirname(destPath);
-		if (!fs.existsSync(dir)) {
-			fs.mkdirSync(dir, { recursive: true });
+		// Ensure parent directory exists
+		const parentDir = destPath.substring(0, destPath.lastIndexOf('\\') !== -1 ? destPath.lastIndexOf('\\') : destPath.lastIndexOf('/'));
+		if (parentDir) {
+			try {
+				await this._fileService.createFolder(URI.file(parentDir));
+			} catch {
+				// directory may already exist
+			}
 		}
 
-		fs.writeFileSync(destPath, result);
+		await this._fileService.writeFile(destUri, VSBuffer.wrap(result));
 		this._logService.info(`[ShiryuAI/HF] Downloaded: ${destPath} (${this.formatSize(totalBytes)})`);
 
 		return destPath;

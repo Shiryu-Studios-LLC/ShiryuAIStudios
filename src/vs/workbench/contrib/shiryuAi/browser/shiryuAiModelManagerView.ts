@@ -19,6 +19,9 @@ import { IViewletViewOptions } from '../../../browser/parts/views/viewsViewlet.j
 import { IViewDescriptorService } from '../../../common/views.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IPathService } from '../../../services/path/common/pathService.js';
 import { IShiryuAiService, ShiryuProviderKind } from '../common/shiryuAiService.js';
 import { HuggingFaceProvider } from '../common/shiryuAiHuggingFace.js';
 const $ = DOM.$;
@@ -75,13 +78,15 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		@IHoverService hoverService: IHoverService,
 		@IShiryuAiService private readonly _shiryuAiService: IShiryuAiService,
 		@IFileDialogService private readonly _fileDialogService: IFileDialogService,
+		@IFileService private readonly _fileService: IFileService,
+		@IPathService private readonly _pathService: IPathService,
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super(options, keybindingService, contextMenuService, _configurationService,
 			contextKeyService, viewDescriptorService, instantiationService,
 			openerService, themeService, hoverService);
 
-		this._hfProvider = new HuggingFaceProvider(this._logService);
+		this._hfProvider = new HuggingFaceProvider(this._logService, this._fileService);
 		this._disposables.add(this._hfProvider);
 
 		this._disposables.add(this._shiryuAiService.onDidChangeAvailability(() => {
@@ -650,9 +655,11 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		this._hfStatusText.style.color = 'var(--vscode-descriptionForeground)';
 
 		try {
-			const detail = await this._hfProvider.getModelFiles(modelId);
+			const hfToken = this._configurationService.getValue<string>('shiryuAi.huggingFaceToken') || undefined;
+			const detail = await this._hfProvider.getModelFiles(modelId, hfToken);
 			if (detail.fileCount === 0) {
-				this._hfStatusText.textContent = localize('hfNoGGUF', 'No GGUF files found for this model.');
+				this._hfStatusText.textContent = localize('hfNoGGUF', 'No GGUF files found. This model may be gated — set your HF token in Settings.');
+				this._hfStatusText.style.color = 'var(--vscode-warningForeground)';
 				return;
 			}
 
@@ -673,7 +680,7 @@ export class ShiryuAiModelManagerView extends ViewPane {
 			this._disposables.add(DOM.addDisposableListener(backBtn, DOM.EventType.CLICK, () => this._searchHuggingFace()));
 
 			// Download directory
-			const downloadDir = this._getDownloadDir();
+			const downloadDir = await this._getDownloadDir();
 
 			for (const file of detail.ggufFiles) {
 				const fileRow = DOM.append(this._hfModelList, $('.shiryu-ai-hf-file-row'));
@@ -701,46 +708,96 @@ export class ShiryuAiModelManagerView extends ViewPane {
 				fileSize.style.fontSize = '10px';
 				fileSize.style.color = 'var(--vscode-descriptionForeground)';
 
-				const fileBtn = DOM.append(fileRow, $('button.shiryu-ai-hf-file-download'));
-				fileBtn.textContent = localize('download', 'Download');
-				fileBtn.style.padding = '3px 10px';
-				fileBtn.style.fontSize = '11px';
-				fileBtn.style.cursor = 'pointer';
-				fileBtn.style.background = 'var(--vscode-button-background)';
-				fileBtn.style.color = 'var(--vscode-button-foreground)';
-				fileBtn.style.border = 'none';
-				fileBtn.style.borderRadius = '2px';
-				fileBtn.style.whiteSpace = 'nowrap';
+					const destPath = `${downloadDir}\\${file.filename}`;
 
-				const destPath = `${downloadDir}\\${file.filename}`;
+				// Check if file already exists
+				let fileExists = false;
+				try {
+					const destUri = URI.file(destPath);
+					fileExists = await this._fileService.exists(destUri);
+				} catch {
+					// ignore
+				}
 
-				this._disposables.add(DOM.addDisposableListener(fileBtn, DOM.EventType.CLICK, async () => {
-					this._setButtonBusy(fileBtn as HTMLElement, true, localize('downloading', 'Downloading...'));
-					try {
-						await this._hfProvider.downloadFile(modelId, file.path, destPath,
-							(_bytes, total, percent) => {
-								(fileBtn as HTMLElement).textContent = `${percent}%`;
-								this._hfStatusText.textContent = localize('hfDownloading', 'Downloading {0}... {1}%', file.filename, percent);
-							},
-							this._hfAbortController?.signal,
-						);
-						(fileBtn as HTMLElement).textContent = localize('downloaded', 'Downloaded');
-						(fileBtn as HTMLElement).style.color = 'var(--vscode-charts-green)';
-						// Set the model path input
-						if (this._modelPathInput) {
-							this._modelPathInput.value = destPath;
+				if (fileExists) {
+					// Show "Downloaded" label + Delete button
+					const downloadedLabel = DOM.append(fileRow, $('span'));
+					downloadedLabel.textContent = localize('downloaded', 'Downloaded');
+					downloadedLabel.style.fontSize = '11px';
+					downloadedLabel.style.color = 'var(--vscode-charts-green)';
+					downloadedLabel.style.fontWeight = 'bold';
+
+					const deleteBtn = DOM.append(fileRow, $('button.shiryu-ai-hf-file-delete'));
+					deleteBtn.textContent = localize('delete', 'Delete');
+					deleteBtn.style.padding = '3px 10px';
+					deleteBtn.style.fontSize = '11px';
+					deleteBtn.style.cursor = 'pointer';
+					deleteBtn.style.background = 'var(--vscode-inputValidation-errorBackground)';
+					deleteBtn.style.color = 'var(--vscode-errorForeground)';
+					deleteBtn.style.border = '1px solid var(--vscode-inputValidation-errorBorder)';
+					deleteBtn.style.borderRadius = '2px';
+					deleteBtn.style.whiteSpace = 'nowrap';
+
+					this._disposables.add(DOM.addDisposableListener(deleteBtn, DOM.EventType.CLICK, async () => {
+						this._setButtonBusy(deleteBtn as HTMLElement, true, localize('deleting', 'Deleting...'));
+						try {
+							const destUri = URI.file(destPath);
+							await this._fileService.del(destUri);
+							this._hfStatusText.textContent = localize('hfDeleted', 'Deleted: {0}', file.filename);
+							this._hfStatusText.style.color = 'var(--vscode-charts-green)';
+							// Refresh the file list
+							await this._showModelFiles(modelId);
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							this._hfStatusText.textContent = localize('hfDeleteFailed', 'Delete failed: {0}', msg);
+							this._hfStatusText.style.color = 'var(--vscode-errorForeground)';
+						} finally {
+							this._setButtonBusy(deleteBtn as HTMLElement, false, localize('delete', 'Delete'));
 						}
-						this._configurationService.updateValue('shiryuAi.modelPath', destPath);
-						this._hfStatusText.textContent = localize('hfDownloadComplete', 'Downloaded: {0}', destPath);
-						this._hfStatusText.style.color = 'var(--vscode-charts-green)';
-					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						(fileBtn as HTMLElement).textContent = localize('failed', 'Failed');
-						(fileBtn as HTMLElement).style.color = 'var(--vscode-errorForeground)';
-						this._hfStatusText.textContent = localize('hfDownloadFailed', 'Download failed: {0}', msg);
-						this._hfStatusText.style.color = 'var(--vscode-errorForeground)';
-					}
-				}));
+					}));
+				} else {
+					// Show Download button
+					const fileBtn = DOM.append(fileRow, $('button.shiryu-ai-hf-file-download'));
+					fileBtn.textContent = localize('download', 'Download');
+					fileBtn.style.padding = '3px 10px';
+					fileBtn.style.fontSize = '11px';
+					fileBtn.style.cursor = 'pointer';
+					fileBtn.style.background = 'var(--vscode-button-background)';
+					fileBtn.style.color = 'var(--vscode-button-foreground)';
+					fileBtn.style.border = 'none';
+					fileBtn.style.borderRadius = '2px';
+					fileBtn.style.whiteSpace = 'nowrap';
+
+					this._disposables.add(DOM.addDisposableListener(fileBtn, DOM.EventType.CLICK, async () => {
+						this._setButtonBusy(fileBtn as HTMLElement, true, localize('downloading', 'Downloading...'));
+						try {
+							await this._hfProvider.downloadFile(modelId, file.path, destPath,
+								(_bytes, total, percent) => {
+									(fileBtn as HTMLElement).textContent = `${percent}%`;
+									this._hfStatusText.textContent = localize('hfDownloading', 'Downloading {0}... {1}%', file.filename, percent);
+								},
+							this._hfAbortController?.signal,
+							);
+							(fileBtn as HTMLElement).textContent = localize('downloaded', 'Downloaded');
+							(fileBtn as HTMLElement).style.color = 'var(--vscode-charts-green)';
+							// Set the model path input
+							if (this._modelPathInput) {
+								this._modelPathInput.value = destPath;
+							}
+							this._configurationService.updateValue('shiryuAi.modelPath', destPath);
+							this._hfStatusText.textContent = localize('hfDownloadComplete', 'Downloaded: {0}', destPath);
+							this._hfStatusText.style.color = 'var(--vscode-charts-green)';
+							// Refresh to show delete button
+							await this._showModelFiles(modelId);
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							(fileBtn as HTMLElement).textContent = localize('failed', 'Failed');
+							(fileBtn as HTMLElement).style.color = 'var(--vscode-errorForeground)';
+							this._hfStatusText.textContent = localize('hfDownloadFailed', 'Download failed: {0}', msg);
+							this._hfStatusText.style.color = 'var(--vscode-errorForeground)';
+						}
+					}));
+				}
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -757,15 +814,17 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		this._hfStatusText.style.color = 'var(--vscode-descriptionForeground)';
 
 		try {
-			const detail = await this._hfProvider.getModelFiles(modelId);
+			const hfToken = this._configurationService.getValue<string>('shiryuAi.huggingFaceToken') || undefined;
+			const detail = await this._hfProvider.getModelFiles(modelId, hfToken);
 			if (detail.fileCount === 0) {
-				this._hfStatusText.textContent = localize('hfNoGGUF', 'No GGUF files found.');
+				this._hfStatusText.textContent = localize('hfNoGGUF', 'No GGUF files found. This model may be gated — set your HF token in Settings.');
+				this._hfStatusText.style.color = 'var(--vscode-warningForeground)';
 				return;
 			}
 
 			// Auto-download the first/smallest GGUF file
 			const smallest = detail.ggufFiles.sort((a, b) => a.size - b.size)[0];
-			const downloadDir = this._getDownloadDir();
+			const downloadDir = await this._getDownloadDir();
 			const destPath = `${downloadDir}\\${smallest.filename}`;
 
 			this._hfStatusText.textContent = localize('hfAutoDownloading', 'Downloading {0} ({1})...',
@@ -806,13 +865,13 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		this._disposables.add(DOM.addDisposableListener(backBtn, DOM.EventType.CLICK, () => this._searchHuggingFace()));
 	}
 
-	private _getDownloadDir(): string {
+	private async _getDownloadDir(): Promise<string> {
 		const configured = this._configurationService.getValue<string>('shiryuAi.downloadDir');
 		if (configured) { return configured; }
 
-		// Default: user home / .shiryu-ai-studio / models
-		const home = process.env.USERPROFILE || process.env.HOME || 'C:\\';
-		return `${home}\\.shiryu-ai-studio\\models`;
+		// Use VS Code's path service to resolve home directory
+		const homeDir = await this._pathService.userHome();
+		return `${homeDir.fsPath}\\.shiryu-ai-studio\\models`;
 	}
 
 	//#endregion
