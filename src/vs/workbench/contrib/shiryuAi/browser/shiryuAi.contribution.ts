@@ -27,6 +27,7 @@ import { localize2 } from '../../../../nls.js';
 import { ViewPaneContainer } from '../../../browser/parts/views/viewPaneContainer.js';
 import { Extensions as ViewExtensions, IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainerLocation } from '../../../common/views.js';
 import { ShiryuAiModelManagerView } from './shiryuAiModelManagerView.js';
+import { ShiryuAiChatView } from './shiryuAiChatView.js';
 
 //#region Agent Data
 
@@ -582,6 +583,27 @@ const modelManagerViewDescriptor: IViewDescriptor = {
 };
 
 viewsRegistry.registerViews([modelManagerViewDescriptor], modelManagerContainer);
+
+//#endregion
+
+//#region Chat View
+
+const CHAT_VIEW_ID = ShiryuAiChatView.ID;
+
+const chatViewDescriptor: IViewDescriptor = {
+	id: CHAT_VIEW_ID,
+	name: localize2('shiryuAiChat', 'Chat'),
+	containerIcon: shiryuAiModelManagerIcon,
+	ctorDescriptor: new SyncDescriptor(ShiryuAiChatView),
+	canToggleVisibility: true,
+	canMoveView: true,
+	openCommandActionDescriptor: {
+		id: CHAT_VIEW_ID,
+		title: localize2('shiryuAiChat.focus', 'Focus Shiryu AI Chat'),
+	},
+};
+
+viewsRegistry.registerViews([chatViewDescriptor], modelManagerContainer);
 
 //#endregion
 
