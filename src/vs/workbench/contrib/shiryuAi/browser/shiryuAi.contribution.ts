@@ -473,6 +473,11 @@ configurationRegistry.registerConfiguration({
 			default: 'http://localhost:11434',
 			description: 'URL of the Ollama server. Change if running Ollama on a different machine or port.',
 		},
+		'shiryuAi.downloadDir': {
+			type: 'string',
+			default: '',
+			description: 'Directory to save downloaded GGUF models. Leave empty for default (~/.shiryu-ai-studio/models).',
+		},
 	},
 });
 
