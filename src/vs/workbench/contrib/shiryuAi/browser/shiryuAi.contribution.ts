@@ -14,6 +14,7 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IShiryuAiService } from '../common/shiryuAiService.js';
+import { IShiryuToolService, IShiryuToolCall } from '../common/shiryuAiTools.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ChatConfiguration } from '../../chat/common/constants.js';
@@ -84,6 +85,7 @@ class ShiryuAiAgent implements IChatAgentImplementation {
 
 	constructor(
 		private readonly shiryuAiService: IShiryuAiService,
+		private readonly toolService: IShiryuToolService,
 		private readonly logService: ILogService,
 	) { }
 
@@ -121,8 +123,8 @@ class ShiryuAiAgent implements IChatAgentImplementation {
 			};
 		}
 
-		// Build the prompt with conversation history
-		const fullPrompt = this.buildPrompt(request.message, history);
+		// Build the prompt with conversation history and tool definitions
+		const fullPrompt = this.buildPrompt(request.message, history, true);
 
 		// Stream tokens to the chat
 		try {
@@ -141,6 +143,11 @@ class ShiryuAiAgent implements IChatAgentImplementation {
 				`[ShiryuAI] Response generated: ${response.tokenCount} tokens in ${response.durationMs}ms ` +
 				`(${response.tokensPerSecond.toFixed(1)} tokens/sec)`
 			);
+
+			// Execute tool calls if any
+			if (response.toolCalls && response.toolCalls.length > 0) {
+				return await this._handleToolCalls(response.toolCalls, progress, token);
+			}
 
 			return {
 				metadata: {
@@ -261,8 +268,57 @@ class ShiryuAiAgent implements IChatAgentImplementation {
 		}
 	}
 
-	private buildPrompt(message: string, history: IChatAgentHistoryEntry[]): string {
+	private async _handleToolCalls(
+		toolCalls: IShiryuToolCall[],
+		progress: (parts: IChatProgress[]) => void,
+		token: CancellationToken,
+	): Promise<IChatAgentResult> {
+		const results = await this.toolService.executeTools(toolCalls, token);
+
 		const parts: string[] = [];
+		for (const result of results) {
+			if (result.success) {
+				parts.push(`**Tool: ${result.name}** — Success`);
+				if (result.result) {
+					parts.push('```json');
+					parts.push(JSON.stringify(result.result, null, 2));
+					parts.push('```');
+				}
+				if (result.images && result.images.length > 0) {
+					parts.push(`Generated ${result.images.length} image(s).`);
+				}
+				if (result.files && result.files.length > 0) {
+					parts.push(`Output files: ${result.files.join(', ')}`);
+				}
+			} else {
+				parts.push(`**Tool: ${result.name}** — Error: ${result.error}`);
+			}
+		}
+
+		progress([{
+			kind: 'markdownContent',
+			content: new MarkdownString(parts.join('\n\n')),
+		}]);
+
+		return {
+			metadata: {
+				toolCalls: toolCalls.map(c => c.name),
+				toolResults: results.map(r => ({ name: r.name, success: r.success })),
+			},
+		};
+	}
+
+	private buildPrompt(message: string, history: IChatAgentHistoryEntry[], includeTools: boolean = false): string {
+		const parts: string[] = [];
+
+		// System prompt with tool definitions
+		if (includeTools) {
+			const toolPrompt = this.toolService.generateToolPrompt();
+			if (toolPrompt) {
+				parts.push(toolPrompt);
+				parts.push('');
+			}
+		}
 
 		if (history.length > 0) {
 			parts.push('Previous conversation:');
@@ -297,12 +353,14 @@ class ShiryuAiContribution extends Disposable {
 
 	constructor(
 		@IShiryuAiService private readonly shiryuAiService: IShiryuAiService,
+		@IShiryuToolService private readonly toolService: IShiryuToolService,
 		@IChatAgentService private readonly chatAgentService: IChatAgentService,
 		@ILogService private readonly logService: ILogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
 		this._registerAgent();
+		this._registerToolProviders();
 	}
 
 	private _registered = false;
@@ -314,7 +372,7 @@ class ShiryuAiContribution extends Disposable {
 
 		this.logService.info('[ShiryuAI] Initializing Shiryu AI Studio agent...');
 
-		const agentImpl = new ShiryuAiAgent(this.shiryuAiService, this.logService);
+		const agentImpl = new ShiryuAiAgent(this.shiryuAiService, this.toolService, this.logService);
 
 		const disposable = this.chatAgentService.registerDynamicAgent(
 			shiryuAiAgentData,
@@ -336,6 +394,29 @@ class ShiryuAiContribution extends Disposable {
 		);
 
 		this.logService.info('[ShiryuAI] Agent registered successfully');
+	}
+
+	private _registerToolProviders(): void {
+		// Import and register tool providers
+		import('../common/shiryuAiComfyUI.js').then(({ ComfyUIToolProvider }) => {
+			const comfyuiUrl = this.configurationService.getValue<string>('shiryuAi.comfyuiUrl') || 'http://localhost:8188';
+			const provider = new ComfyUIToolProvider(this.logService, comfyuiUrl);
+			this.toolService.registerProvider(provider);
+			this._disposables.add(provider);
+			this.logService.info('[ShiryuAI] ComfyUI tool provider registered');
+		}).catch(err => {
+			this.logService.warn(`[ShiryuAI] Failed to register ComfyUI provider: ${err}`);
+		});
+
+		import('../common/shiryuAiWhisper.js').then(({ WhisperToolProvider }) => {
+			const whisperUrl = this.configurationService.getValue<string>('shiryuAi.whisperUrl') || 'http://localhost:9000';
+			const provider = new WhisperToolProvider(this.logService, whisperUrl);
+			this.toolService.registerProvider(provider);
+			this._disposables.add(provider);
+			this.logService.info('[ShiryuAI] Whisper tool provider registered');
+		}).catch(err => {
+			this.logService.warn(`[ShiryuAI] Failed to register Whisper provider: ${err}`);
+		});
 	}
 
 	private _syncCopilotState(): void {
@@ -477,6 +558,21 @@ configurationRegistry.registerConfiguration({
 			type: 'string',
 			default: '',
 			description: 'Directory to save downloaded GGUF models. Leave empty for default (~/.shiryu-ai-studio/models).',
+		},
+		'shiryuAi.comfyuiUrl': {
+			type: 'string',
+			default: 'http://localhost:8188',
+			description: 'URL of the ComfyUI server for image/video generation.',
+		},
+		'shiryuAi.whisperUrl': {
+			type: 'string',
+			default: 'http://localhost:9000',
+			description: 'URL of the Whisper server for audio transcription.',
+		},
+		'shiryuAi.enableTools': {
+			type: 'boolean',
+			default: true,
+			description: 'Enable tool calling (ComfyUI, Whisper). The model can invoke external tools when needed.',
 		},
 	},
 });

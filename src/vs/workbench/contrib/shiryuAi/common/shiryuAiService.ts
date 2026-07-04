@@ -6,6 +6,7 @@
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { IShiryuToolCall } from './shiryuAiTools.js';
 
 //#region Provider Types
 
@@ -104,6 +105,8 @@ export interface IShiryuAiResponse {
 	durationMs: number;
 	/** Tokens per second */
 	tokensPerSecond: number;
+	/** Tool calls extracted from the response */
+	toolCalls?: IShiryuToolCall[];
 }
 
 export interface IShiryuModelInfo {

@@ -9,6 +9,7 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IShiryuAiService, IShiryuAiResponse, IShiryuModelConfig, IShiryuModelInfo, IShiryuProviderInfo, ShiryuProviderKind } from './shiryuAiService.js';
 import { OllamaProvider } from './shiryuAiOllama.js';
+import { IShiryuToolCall } from './shiryuAiTools.js';
 
 //#region node-llama-cpp dynamic import
 
@@ -312,11 +313,33 @@ export class ShiryuAiService extends Disposable implements IShiryuAiService {
 				tokenCount,
 				durationMs,
 				tokensPerSecond,
+				toolCalls: this._parseToolCalls(fullText),
 			};
 		} finally {
 			this._busy = false;
 			this._onDidChangeBusy.fire(false);
 		}
+	}
+
+	private _parseToolCalls(text: string): IShiryuToolCall[] {
+		const calls: IShiryuToolCall[] = [];
+		const toolBlockRegex = /```tool\s*\n([\s\S]*?)\n\s*```/g;
+		let match;
+		while ((match = toolBlockRegex.exec(text)) !== null) {
+			try {
+				const parsed = JSON.parse(match[1].trim());
+				if (parsed.tool && typeof parsed.tool === 'string') {
+					calls.push({
+						id: `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+						name: parsed.tool,
+						arguments: parsed.arguments || {},
+					});
+				}
+			} catch {
+				// ignore parse errors
+			}
+		}
+		return calls;
 	}
 
 	//#endregion
