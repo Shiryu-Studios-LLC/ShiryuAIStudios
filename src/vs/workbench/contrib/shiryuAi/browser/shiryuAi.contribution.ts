@@ -579,6 +579,12 @@ configurationRegistry.registerConfiguration({
 			default: '',
 			description: 'Hugging Face API token (optional). Required only for gated/private models. Get one at https://huggingface.co/settings/tokens',
 		},
+		'shiryuAi.recentModels': {
+			type: 'array',
+			items: { type: 'string' },
+			default: [],
+			description: 'Recently loaded model paths (for quick switching).',
+		},
 	},
 });
 

@@ -212,6 +212,25 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		this._loadButton.style.borderRadius = '2px';
 		this._loadButton.style.fontWeight = 'bold';
 
+		// ── Recent Models ──
+		const recentSection = DOM.append(this._llamaCppSection, $('.shiryu-ai-recent-section'));
+		recentSection.style.display = 'flex';
+		recentSection.style.flexDirection = 'column';
+		recentSection.style.gap = '4px';
+
+		const recentLabel = DOM.append(recentSection, $('label'));
+		recentLabel.textContent = localize('recentModels', 'Recent Models');
+		recentLabel.style.fontSize = '11px';
+		recentLabel.style.color = 'var(--vscode-descriptionForeground)';
+		recentLabel.style.marginTop = '4px';
+
+		const recentList = DOM.append(recentSection, $('.shiryu-ai-recent-list'));
+		recentList.style.display = 'flex';
+		recentList.style.flexDirection = 'column';
+		recentList.style.gap = '2px';
+
+		this._refreshRecentModels(recentList);
+
 		// ── Ollama Section ──
 		this._ollamaSection = DOM.append(this._contentContainer, $('.shiryu-ai-ollama-section'));
 		this._ollamaSection.style.display = 'none';
@@ -962,6 +981,22 @@ export class ShiryuAiModelManagerView extends ViewPane {
 	private async _loadModel(): Promise<void> {
 		const modelPath = this._modelPathInput?.value.trim();
 		if (!modelPath) { return; }
+
+		// Show loading state
+		this._setButtonBusy(this._loadButton as HTMLElement, true, localize('loading', 'Loading...'));
+		this._statusText.textContent = localize('statusLoading', 'llama.cpp — Loading model...');
+		this._statusText.style.color = 'var(--vscode-charts-yellow)';
+
+		if (this._modelInfoContainer) {
+			this._modelInfoContainer.style.display = 'flex';
+			DOM.clearNode(this._modelInfoContainer);
+			const loadingText = DOM.append(this._modelInfoContainer, $('div'));
+			loadingText.textContent = localize('loadingModel', 'Loading {0}...', modelPath.split('\\').pop() || modelPath);
+			loadingText.style.fontSize = '12px';
+			loadingText.style.color = 'var(--vscode-charts-yellow)';
+			loadingText.style.fontStyle = 'italic';
+		}
+
 		try {
 			await this._shiryuAiService.loadModel({
 				modelPath,
@@ -970,19 +1005,108 @@ export class ShiryuAiModelManagerView extends ViewPane {
 				temperature: this._configurationService.getValue<number>('shiryuAi.temperature') ?? 0.7,
 				maxTokens: this._configurationService.getValue<number>('shiryuAi.maxTokens') ?? 2048,
 			});
-			this._refreshStatus();
-			this._refreshModelInfo();
+			this._addRecentModel(modelPath);
+			this._statusText.textContent = localize('statusLoaded', 'llama.cpp — Model loaded and ready');
+			this._statusText.style.color = 'var(--vscode-charts-green)';
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			this._logService.error(`[ShiryuAI] Load failed: ${msg}`);
+			this._statusText.textContent = localize('statusError', 'llama.cpp — Load failed: {0}', msg);
+			this._statusText.style.color = 'var(--vscode-errorForeground)';
+		} finally {
+			this._setButtonBusy(this._loadButton as HTMLElement, false, localize('loadModel', 'Load Model'));
+			this._refreshStatus();
+			this._refreshModelInfo();
 		}
 	}
 
 	private async _unloadModel(): Promise<void> {
-		await this._shiryuAiService.unloadModel();
-		this._refreshStatus();
-		this._refreshModelInfo();
+		this._setButtonBusy(this._unloadButton as HTMLElement, true, localize('unloading', 'Unloading...'));
+		try {
+			await this._shiryuAiService.unloadModel();
+			this._statusText.textContent = localize('statusUnloaded', 'llama.cpp — Model unloaded');
+			this._statusText.style.color = 'var(--vscode-descriptionForeground)';
+		} finally {
+			this._setButtonBusy(this._unloadButton as HTMLElement, false, localize('unloadModel', 'Unload Model'));
+			this._refreshStatus();
+			this._refreshModelInfo();
+		}
 	}
+
+	//#region Recent Models
+
+	private _getRecentModels(): string[] {
+		return this._configurationService.getValue<string[]>('shiryuAi.recentModels') || [];
+	}
+
+	private _addRecentModel(modelPath: string): void {
+		let recent = this._getRecentModels();
+		// Remove if already in list
+		recent = recent.filter(p => p !== modelPath);
+		// Add to front
+		recent.unshift(modelPath);
+		// Keep max 5
+		if (recent.length > 5) {
+			recent = recent.slice(0, 5);
+		}
+		this._configurationService.updateValue('shiryuAi.recentModels', recent);
+	}
+
+	private _refreshRecentModels(container: HTMLElement): void {
+		if (!container) { return; }
+		DOM.clearNode(container);
+
+		const recent = this._getRecentModels();
+		if (recent.length === 0) {
+			const empty = DOM.append(container, $('div'));
+			empty.textContent = localize('noRecent', 'No models loaded yet');
+			empty.style.fontSize = '11px';
+			empty.style.color = 'var(--vscode-disabledForeground)';
+			empty.style.fontStyle = 'italic';
+			return;
+		}
+
+		for (const modelPath of recent) {
+			const fileName = modelPath.split('\\').pop() || modelPath.split('/').pop() || modelPath;
+			const row = DOM.append(container, $('.shiryu-ai-recent-item'));
+			row.style.display = 'flex';
+			row.style.alignItems = 'center';
+			row.style.gap = '6px';
+			row.style.padding = '3px 6px';
+			row.style.borderRadius = '3px';
+			row.style.cursor = 'pointer';
+			row.style.fontSize = '11px';
+			row.style.color = 'var(--vscode-textLink.foreground)';
+
+			const icon = DOM.append(row, $('span'));
+			icon.textContent = '$(file)';
+			icon.style.fontSize = '11px';
+
+			const name = DOM.append(row, $('span'));
+			name.textContent = fileName;
+			name.style.overflow = 'hidden';
+			name.style.textOverflow = 'ellipsis';
+			name.style.whiteSpace = 'nowrap';
+			name.style.flex = '1';
+
+			this._disposables.add(DOM.addDisposableListener(row, DOM.EventType.CLICK, () => {
+				if (this._modelPathInput) {
+					this._modelPathInput.value = modelPath;
+				}
+				this._configurationService.updateValue('shiryuAi.modelPath', modelPath);
+				this._loadModel();
+			}));
+
+			this._disposables.add(DOM.addDisposableListener(row, DOM.EventType.MOUSE_ENTER, () => {
+				row.style.background = 'var(--vscode-list-hoverBackground)';
+			}));
+			this._disposables.add(DOM.addDisposableListener(row, DOM.EventType.MOUSE_LEAVE, () => {
+				row.style.background = 'transparent';
+			}));
+		}
+	}
+
+	//#endregion
 
 	private _setButtonBusy(btn: HTMLElement, busy: boolean, text?: string): void {
 		if (!btn) { return; }
