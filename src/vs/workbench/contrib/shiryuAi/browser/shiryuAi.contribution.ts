@@ -17,6 +17,8 @@ import { IShiryuAiService } from '../common/shiryuAiService.js';
 import { IShiryuToolService, IShiryuToolCall } from '../common/shiryuAiTools.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { URI } from '../../../../base/common/uri.js';
 import { ChatConfiguration } from '../../chat/common/constants.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
@@ -28,54 +30,57 @@ import { ShiryuAiModelManagerView } from './shiryuAiModelManagerView.js';
 
 //#region Agent Data
 
-const SHIRYU_AI_AGENT_ID = 'shiryu-ai-studio';
+function createAgentData(name: string, description: string, modelPath: string): IChatAgentData {
+	const baseId = modelPath.replace(/[^a-zA-Z0-9\-_]/g, '-').replace(/-+/g, '-').toLowerCase();
+	const id = `shiryu-ai-${baseId}`.substring(0, 64);
 
-const shiryuAiAgentData: IChatAgentData = {
-	id: SHIRYU_AI_AGENT_ID,
-	name: 'Shiryu AI',
-	fullName: 'Shiryu AI Studio',
-	description: 'Local AI powered by llama.cpp — runs on your hardware, no cloud required.',
-	isDefault: true,
-	isCore: true,
-	extensionId: new ExtensionIdentifier('shiryu-studios.shiryu-ai-studio'),
-	extensionVersion: '1.0.0',
-	extensionPublisherId: 'shiryu-studios',
-	publisherDisplayName: 'Shiryu Studios LLC',
-	extensionDisplayName: 'Shiryu AI Studio',
-	locations: [ChatAgentLocation.Chat, ChatAgentLocation.Terminal, ChatAgentLocation.Notebook],
-	modes: [ChatModeKind.Ask, ChatModeKind.Edit, ChatModeKind.Agent],
-	slashCommands: [
-		{
-			name: 'load-model',
-			description: 'Load a GGUF model file for local inference',
-			followupPlaceholder: 'Enter path to .gguf model file',
+	return {
+		id,
+		name,
+		fullName: `Shiryu AI (${name})`,
+		description,
+		isDefault: modelPath === '', // Only the default is the empty-path generic agent
+		isCore: true,
+		extensionId: new ExtensionIdentifier('shiryu-studios.shiryu-ai-studio'),
+		extensionVersion: '1.0.0',
+		extensionPublisherId: 'shiryu-studios',
+		publisherDisplayName: 'Shiryu Studios LLC',
+		extensionDisplayName: 'Shiryu AI Studio',
+		locations: [ChatAgentLocation.Chat, ChatAgentLocation.Terminal, ChatAgentLocation.Notebook],
+		modes: [ChatModeKind.Ask, ChatModeKind.Edit, ChatModeKind.Agent],
+		slashCommands: [
+			{
+				name: 'load-model',
+				description: 'Load a GGUF model file for local inference',
+				followupPlaceholder: 'Enter path to .gguf model file',
+			},
+			{
+				name: 'unload-model',
+				description: 'Unload the current model and free memory',
+			},
+			{
+				name: 'model-info',
+				description: 'Show information about the currently loaded model',
+			},
+		],
+		disambiguation: [
+			{
+				category: 'local-ai',
+				description: `${name} — local AI using llama.cpp`,
+				examples: ['write a function', 'fix this bug', 'explain this code', 'refactor this'],
+			},
+		],
+		metadata: {
+			themeIcon: { id: 'robot' },
+			helpTextPrefix: `${name} runs locally on your machine using llama.cpp.`,
+			followupPlaceholder: `Ask ${name} anything...`,
 		},
-		{
-			name: 'unload-model',
-			description: 'Unload the current model and free memory',
+		capabilities: {
+			supportsFileAttachments: false,
+			supportsToolAttachments: false,
 		},
-		{
-			name: 'model-info',
-			description: 'Show information about the currently loaded model',
-		},
-	],
-	disambiguation: [
-		{
-			category: 'local-ai',
-			description: 'Local AI inference using llama.cpp — runs entirely on your machine',
-			examples: ['write a function', 'fix this bug', 'explain this code', 'refactor this'],
-		},
-	],
-	metadata: {
-		themeIcon: { id: 'robot' },
-		helpTextPrefix: 'Shiryu AI runs locally on your machine using llama.cpp.',
-		followupPlaceholder: 'Ask Shiryu AI anything...',
-	},
-	capabilities: {
-		supportsFileAttachments: false,
-		supportsToolAttachments: false,
-	},
-};
+	};
+}
 
 //#endregion
 
@@ -83,11 +88,21 @@ const shiryuAiAgentData: IChatAgentData = {
 
 class ShiryuAiAgent implements IChatAgentImplementation {
 
+	/** Optional bound model path — if set, auto-loads this model */
+	private _boundModelPath: string | undefined;
+	private _modelName: string;
+
 	constructor(
 		private readonly shiryuAiService: IShiryuAiService,
 		private readonly toolService: IShiryuToolService,
 		private readonly logService: ILogService,
-	) { }
+		modelPath?: string,
+	) {
+		this._boundModelPath = modelPath;
+		this._modelName = modelPath
+			? (modelPath.split('\\').pop() || modelPath.split('/').pop() || modelPath).replace('.gguf', '')
+			: 'Shiryu AI';
+	}
 
 	async invoke(
 		request: IChatAgentRequest,
@@ -99,6 +114,34 @@ class ShiryuAiAgent implements IChatAgentImplementation {
 		// Handle slash commands
 		if (request.command) {
 			return this.handleCommand(request.command, request.message, progress, token);
+		}
+
+		// If this agent is bound to a specific model, auto-load it
+		if (this._boundModelPath) {
+			const currentInfo = this.shiryuAiService.getModelInfo();
+			const isAlreadyLoaded = currentInfo && currentInfo.modelPath === this._boundModelPath;
+
+			if (!isAlreadyLoaded) {
+				progress([{
+					kind: 'markdownContent',
+					content: new MarkdownString(`Loading \`${this._modelName}\`...`),
+				}]);
+				try {
+					await this.shiryuAiService.loadModel({
+						modelPath: this._boundModelPath,
+						gpuLayers: -1,
+						temperature: 0.7,
+						maxTokens: 2048,
+					});
+				} catch (err) {
+					const errorMsg = err instanceof Error ? err.message : String(err);
+					progress([{
+						kind: 'markdownContent',
+						content: new MarkdownString(`**Failed to load model:** ${errorMsg}`),
+					}]);
+					return { errorDetails: { message: errorMsg } };
+				}
+			}
 		}
 
 		// Regular prompt — send to local model
@@ -357,33 +400,74 @@ class ShiryuAiContribution extends Disposable {
 		@IChatAgentService private readonly chatAgentService: IChatAgentService,
 		@ILogService private readonly logService: ILogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IFileService private readonly fileService: IFileService,
 	) {
 		super();
-		this._registerAgent();
+		this._registerAgents();
 		this._registerToolProviders();
 	}
 
 	private _registered = false;
 
-	private _registerAgent(): void {
+	private async _registerAgents(): Promise<void> {
 		if (this._registered) {
 			return;
 		}
 
-		this.logService.info('[ShiryuAI] Initializing Shiryu AI Studio agent...');
+		this.logService.info('[ShiryuAI] Scanning for models and registering agents...');
 
-		const agentImpl = new ShiryuAiAgent(this.shiryuAiService, this.toolService, this.logService);
-
-		const disposable = this.chatAgentService.registerDynamicAgent(
-			shiryuAiAgentData,
-			agentImpl
-		);
-
+		// 1. Register the default generic agent (no bound model)
+		const genericData = createAgentData('Shiryu AI', 'Generic local AI — load any model via slash command.', '');
+		const genericAgent = new ShiryuAiAgent(this.shiryuAiService, this.toolService, this.logService);
+		const disposable = this.chatAgentService.registerDynamicAgent(genericData, genericAgent);
 		this._disposables.add(disposable);
+
+		// 2. Scan for downloaded GGUF models
+		const downloadDir = this.configurationService.getValue<string>('shiryuAi.downloadDir');
+		const modelsDir = URI.file(downloadDir || '~/.shiryu-ai-studio/models');
+
+		try {
+			const stat = await this.fileService.resolve(modelsDir);
+			if (stat.children) {
+				for (const child of stat.children) {
+					if (child.name.endsWith('.gguf') && !child.name.startsWith('mmproj')) {
+						const modelFsPath = child.resource.fsPath;
+						const modelName = child.name.replace('.gguf', '');
+
+						const fileSize = child.size ?? 0;
+
+						// Skip if it's just a vision adapter or very small
+						if (fileSize < 500_000_000) {
+							continue;
+						}
+
+						const agentData = createAgentData(modelName,
+							`Local AI — ${modelName} (${this._formatSize(fileSize)})`,
+							modelFsPath);
+
+						const boundAgent = new ShiryuAiAgent(
+							this.shiryuAiService,
+							this.toolService,
+							this.logService,
+							modelFsPath,
+						);
+
+						this._disposables.add(
+							this.chatAgentService.registerDynamicAgent(agentData, boundAgent)
+						);
+
+						this.logService.info(`[ShiryuAI] Registered agent for: ${modelName}`);
+					}
+				}
+			}
+		} catch {
+			// Models directory might not exist yet
+			this.logService.info('[ShiryuAI] No models directory found');
+		}
+
 		this._registered = true;
 
-		// Sync Copilot enablement: when shiryuAi.enableCopilot changes,
-		// update chat.disableAIFeatures accordingly.
+		// Sync Copilot state
 		this._syncCopilotState();
 		this._disposables.add(
 			this.configurationService.onDidChangeConfiguration(e => {
@@ -393,7 +477,14 @@ class ShiryuAiContribution extends Disposable {
 			})
 		);
 
-		this.logService.info('[ShiryuAI] Agent registered successfully');
+		this.logService.info('[ShiryuAI] Agent registration complete');
+	}
+
+	private _formatSize(bytes: number): string {
+		if (bytes < 1024) { return `${bytes} B`; }
+		if (bytes < 1024 * 1024) { return `${(bytes / 1024).toFixed(1)} KB`; }
+		if (bytes < 1024 * 1024 * 1024) { return `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }
+		return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 	}
 
 	private _registerToolProviders(): void {

@@ -980,7 +980,23 @@ export class ShiryuAiModelManagerView extends ViewPane {
 
 	private async _loadModel(): Promise<void> {
 		const modelPath = this._modelPathInput?.value.trim();
-		if (!modelPath) { return; }
+		if (!modelPath) {
+			this._statusText.textContent = localize('statusNoPath', 'No model path specified. Browse or download a model first.');
+			this._statusText.style.color = 'var(--vscode-warningForeground)';
+			return;
+		}
+
+		// Check if file exists
+		try {
+			const exists = await this._fileService.exists(URI.file(modelPath));
+			if (!exists) {
+				this._statusText.textContent = localize('statusFileMissing', 'File not found: {0}', modelPath);
+				this._statusText.style.color = 'var(--vscode-errorForeground)';
+				return;
+			}
+		} catch {
+			// ignore
+		}
 
 		// Show loading state
 		this._setButtonBusy(this._loadButton as HTMLElement, true, localize('loading', 'Loading...'));
