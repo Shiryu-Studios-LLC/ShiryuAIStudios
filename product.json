@@ -202,9 +202,10 @@
 		"nextEditSuggestionsSetting": ""
 	},
 	"extensionsGallery": {
-		"serviceUrl": "https://open-vsx.org/vscode/gallery",
-		"itemUrl": "https://open-vsx.org/vscode/item",
-		"resourceUrlTemplate": "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
-		"extensionUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest"
-	}
+    "serviceUrl": "https://marketplace.visualstudio.com/_apis/public/gallery",
+    "cacheUrl": "https://vscode.blob.core.windows.net/gallery/index",
+    "itemUrl": "https://marketplace.visualstudio.com/items",
+    "controlUrl": "https://raw.githubusercontent.com/Microsoft/vscode/main/extensions/json-language-features/server/typings/vscode.proposed.extensionEnabledApiProposals.d.ts",
+    "resourceTemplate": "https://marketplace.visualstudio.com/_apis/public/gallery/publisher/{publisher}/extension/{extension}/{version}/assetbyname/{asset}"
+    }
 }
