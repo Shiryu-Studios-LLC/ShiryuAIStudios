@@ -19,7 +19,7 @@ import { IViewletViewOptions } from '../../../browser/parts/views/viewsViewlet.j
 import { IViewDescriptorService } from '../../../common/views.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
-import { IShiryuAiService } from '../common/shiryuAiService.js';
+import { IShiryuAiService, ShiryuProviderKind } from '../common/shiryuAiService.js';
 const $ = DOM.$;
 
 export class ShiryuAiModelManagerView extends ViewPane {
@@ -28,10 +28,25 @@ export class ShiryuAiModelManagerView extends ViewPane {
 
 	private _contentContainer!: HTMLElement;
 	private _statusText!: HTMLElement;
+	private _providerSelect!: HTMLSelectElement;
+
+
+	// llama.cpp section
+	private _llamaCppSection!: HTMLElement;
 	private _modelPathInput!: HTMLInputElement;
 	private _loadButton!: HTMLElement;
-	private _unloadButton!: HTMLElement;
 	private _browseButton!: HTMLElement;
+
+	// Ollama section
+	private _ollamaSection!: HTMLElement;
+	private _ollamaModelSelect!: HTMLSelectElement;
+	private _ollamaRefreshButton!: HTMLElement;
+	private _ollamaPullInput!: HTMLInputElement;
+	private _ollamaPullButton!: HTMLElement;
+	private _ollamaStatusText!: HTMLElement;
+
+	// Common
+	private _unloadButton!: HTMLElement;
 	private _modelInfoContainer!: HTMLElement;
 	private readonly _disposables = new DisposableStore();
 
@@ -89,18 +104,56 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		this._statusText.style.fontSize = '13px';
 		this._statusText.style.color = 'var(--vscode-descriptionForeground)';
 
-		// Model Path Section
-		const pathSection = DOM.append(this._contentContainer, $('.shiryu-ai-path-section'));
-		pathSection.style.display = 'flex';
-		pathSection.style.flexDirection = 'column';
-		pathSection.style.gap = '6px';
+		// Provider Selection
+		const providerSection = DOM.append(this._contentContainer, $('.shiryu-ai-provider-section'));
+		providerSection.style.display = 'flex';
+		providerSection.style.flexDirection = 'column';
+		providerSection.style.gap = '6px';
 
-		const pathLabel = DOM.append(pathSection, $('label'));
+		const providerLabel = DOM.append(providerSection, $('label'));
+		providerLabel.textContent = localize('provider', 'AI Provider');
+		providerLabel.style.fontSize = '12px';
+		providerLabel.style.fontWeight = 'bold';
+
+		this._providerSelect = DOM.append(providerSection, $('select.shiryu-ai-provider-select')) as HTMLSelectElement;
+		this._providerSelect.style.width = '100%';
+		this._providerSelect.style.padding = '4px 8px';
+		this._providerSelect.style.fontSize = '12px';
+		this._providerSelect.style.background = 'var(--vscode-input-background)';
+		this._providerSelect.style.color = 'var(--vscode-input-foreground)';
+		this._providerSelect.style.border = '1px solid var(--vscode-input-border)';
+		this._providerSelect.style.borderRadius = '2px';
+
+		// Provider options
+		const llamaOpt = document.createElement('option');
+		llamaOpt.value = ShiryuProviderKind.LlamaCpp;
+		llamaOpt.textContent = 'llama.cpp (Local GGUF)';
+		this._providerSelect.appendChild(llamaOpt);
+
+		const ollamaOpt = document.createElement('option');
+		ollamaOpt.value = ShiryuProviderKind.Ollama;
+		ollamaOpt.textContent = 'Ollama (Model Manager)';
+		this._providerSelect.appendChild(ollamaOpt);
+
+		// Set current provider
+		this._providerSelect.value = this._shiryuAiService.activeProvider;
+
+		this._disposables.add(DOM.addDisposableListener(this._providerSelect, DOM.EventType.CHANGE, () => {
+			this._switchProvider(this._providerSelect.value as ShiryuProviderKind);
+		}));
+
+		// llama.cpp Section
+		this._llamaCppSection = DOM.append(this._contentContainer, $('.shiryu-ai-llamacpp-section'));
+		this._llamaCppSection.style.display = 'flex';
+		this._llamaCppSection.style.flexDirection = 'column';
+		this._llamaCppSection.style.gap = '6px';
+
+		const pathLabel = DOM.append(this._llamaCppSection, $('label'));
 		pathLabel.textContent = localize('modelPath', 'GGUF Model File');
 		pathLabel.style.fontSize = '12px';
 		pathLabel.style.fontWeight = 'bold';
 
-		const inputRow = DOM.append(pathSection, $('.shiryu-ai-input-row'));
+		const inputRow = DOM.append(this._llamaCppSection, $('.shiryu-ai-input-row'));
 		inputRow.style.display = 'flex';
 		inputRow.style.gap = '6px';
 
@@ -131,12 +184,7 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		this._browseButton.style.border = '1px solid var(--vscode-button-secondaryBorder)';
 		this._browseButton.style.borderRadius = '2px';
 
-		// Action Buttons
-		const buttonRow = DOM.append(this._contentContainer, $('.shiryu-ai-button-row'));
-		buttonRow.style.display = 'flex';
-		buttonRow.style.gap = '8px';
-
-		this._loadButton = DOM.append(buttonRow, $('button.shiryu-ai-load-button'));
+		this._loadButton = DOM.append(this._llamaCppSection, $('button.shiryu-ai-load-button'));
 		this._loadButton.textContent = localize('loadModel', 'Load Model');
 		this._loadButton.style.padding = '6px 16px';
 		this._loadButton.style.fontSize = '13px';
@@ -147,7 +195,94 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		this._loadButton.style.borderRadius = '2px';
 		this._loadButton.style.fontWeight = 'bold';
 
-		this._unloadButton = DOM.append(buttonRow, $('button.shiryu-ai-unload-button'));
+		// Ollama Section
+		this._ollamaSection = DOM.append(this._contentContainer, $('.shiryu-ai-ollama-section'));
+		this._ollamaSection.style.display = 'none';
+		this._ollamaSection.style.flexDirection = 'column';
+		this._ollamaSection.style.gap = '8px';
+
+		this._ollamaStatusText = DOM.append(this._ollamaSection, $('.shiryu-ai-ollama-status'));
+		this._ollamaStatusText.style.fontSize = '12px';
+		this._ollamaStatusText.style.color = 'var(--vscode-descriptionForeground)';
+		this._ollamaStatusText.style.marginBottom = '4px';
+
+		// Ollama model selector
+		const ollamaModelRow = DOM.append(this._ollamaSection, $('.shiryu-ai-ollama-model-row'));
+		ollamaModelRow.style.display = 'flex';
+		ollamaModelRow.style.gap = '6px';
+
+		this._ollamaModelSelect = DOM.append(ollamaModelRow, $('select.shiryu-ai-ollama-model-select')) as HTMLSelectElement;
+		this._ollamaModelSelect.style.flex = '1';
+		this._ollamaModelSelect.style.padding = '4px 8px';
+		this._ollamaModelSelect.style.fontSize = '12px';
+		this._ollamaModelSelect.style.background = 'var(--vscode-input-background)';
+		this._ollamaModelSelect.style.color = 'var(--vscode-input-foreground)';
+		this._ollamaModelSelect.style.border = '1px solid var(--vscode-input-border)';
+		this._ollamaModelSelect.style.borderRadius = '2px';
+
+		const defaultOpt = document.createElement('option');
+		defaultOpt.value = '';
+		defaultOpt.textContent = localize('selectOllamaModel', 'Select a model...');
+		this._ollamaModelSelect.appendChild(defaultOpt);
+
+		this._ollamaRefreshButton = DOM.append(ollamaModelRow, $('button.shiryu-ai-ollama-refresh'));
+		this._ollamaRefreshButton.textContent = localize('refresh', 'Refresh');
+		this._ollamaRefreshButton.style.padding = '4px 8px';
+		this._ollamaRefreshButton.style.fontSize = '11px';
+		this._ollamaRefreshButton.style.cursor = 'pointer';
+		this._ollamaRefreshButton.style.background = 'var(--vscode-button-secondaryBackground)';
+		this._ollamaRefreshButton.style.color = 'var(--vscode-button-secondaryForeground)';
+		this._ollamaRefreshButton.style.border = '1px solid var(--vscode-button-secondaryBorder)';
+		this._ollamaRefreshButton.style.borderRadius = '2px';
+
+		// Ollama pull section
+		const pullLabel = DOM.append(this._ollamaSection, $('label'));
+		pullLabel.textContent = localize('pullModel', 'Download New Model');
+		pullLabel.style.fontSize = '12px';
+		pullLabel.style.fontWeight = 'bold';
+
+		const pullRow = DOM.append(this._ollamaSection, $('.shiryu-ai-ollama-pull-row'));
+		pullRow.style.display = 'flex';
+		pullRow.style.gap = '6px';
+
+		this._ollamaPullInput = DOM.append(pullRow, $('input.shiryu-ai-ollama-pull-input')) as HTMLInputElement;
+		this._ollamaPullInput.type = 'text';
+		this._ollamaPullInput.placeholder = localize('pullModelPlaceholder', 'e.g. llama3.2, codellama:7b, qwen2.5-coder:7b');
+		this._ollamaPullInput.style.flex = '1';
+		this._ollamaPullInput.style.padding = '4px 8px';
+		this._ollamaPullInput.style.fontSize = '12px';
+		this._ollamaPullInput.style.background = 'var(--vscode-input-background)';
+		this._ollamaPullInput.style.color = 'var(--vscode-input-foreground)';
+		this._ollamaPullInput.style.border = '1px solid var(--vscode-input-border)';
+		this._ollamaPullInput.style.borderRadius = '2px';
+		this._ollamaPullInput.style.outline = 'none';
+
+		this._ollamaPullButton = DOM.append(pullRow, $('button.shiryu-ai-ollama-pull-button'));
+		this._ollamaPullButton.textContent = localize('download', 'Download');
+		this._ollamaPullButton.style.padding = '4px 12px';
+		this._ollamaPullButton.style.fontSize = '12px';
+		this._ollamaPullButton.style.cursor = 'pointer';
+		this._ollamaPullButton.style.background = 'var(--vscode-button-background)';
+		this._ollamaPullButton.style.color = 'var(--vscode-button-foreground)';
+		this._ollamaPullButton.style.border = 'none';
+		this._ollamaPullButton.style.borderRadius = '2px';
+
+		const ollamaLoadButton = DOM.append(this._ollamaSection, $('button.shiryu-ai-ollama-load-button'));
+		ollamaLoadButton.textContent = localize('loadModel', 'Load Model');
+		ollamaLoadButton.style.padding = '6px 16px';
+		ollamaLoadButton.style.fontSize = '13px';
+		ollamaLoadButton.style.cursor = 'pointer';
+		ollamaLoadButton.style.background = 'var(--vscode-button-background)';
+		ollamaLoadButton.style.color = 'var(--vscode-button-foreground)';
+		ollamaLoadButton.style.border = 'none';
+		ollamaLoadButton.style.borderRadius = '2px';
+		ollamaLoadButton.style.fontWeight = 'bold';
+
+		// Common: Unload button
+		const unloadRow = DOM.append(this._contentContainer, $('.shiryu-ai-unload-row'));
+		unloadRow.style.display = 'flex';
+
+		this._unloadButton = DOM.append(unloadRow, $('button.shiryu-ai-unload-button'));
 		this._unloadButton.textContent = localize('unloadModel', 'Unload Model');
 		this._unloadButton.style.padding = '6px 16px';
 		this._unloadButton.style.fontSize = '13px';
@@ -171,9 +306,24 @@ export class ShiryuAiModelManagerView extends ViewPane {
 				this._configurationService.updateValue('shiryuAi.modelPath', this._modelPathInput.value);
 			}
 		}));
+		this._disposables.add(DOM.addDisposableListener(this._ollamaRefreshButton, DOM.EventType.CLICK, () => this._refreshOllamaModels()));
+		this._disposables.add(DOM.addDisposableListener(this._ollamaPullButton, DOM.EventType.CLICK, () => this._pullOllamaModel()));
+		this._disposables.add(DOM.addDisposableListener(this._ollamaModelSelect, DOM.EventType.CHANGE, () => {
+			const selected = this._ollamaModelSelect.value;
+			if (selected) {
+				this._ollamaPullInput.value = selected;
+			}
+		}));
+		this._disposables.add(DOM.addDisposableListener(ollamaLoadButton, DOM.EventType.CLICK, () => this._loadOllamaModel()));
 
+		this._refreshProviderVisibility();
 		this._refreshStatus();
 		this._refreshModelInfo();
+
+		// If Ollama provider, refresh model list
+		if (this._shiryuAiService.activeProvider === ShiryuProviderKind.Ollama) {
+			this._refreshOllamaModels();
+		}
 	}
 
 	protected override layoutBody(height: number, width: number): void {
@@ -185,6 +335,183 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		super.dispose();
 	}
 
+	private _refreshProviderVisibility(): void {
+		const isOllama = this._providerSelect?.value === ShiryuProviderKind.Ollama;
+		if (this._llamaCppSection) {
+			this._llamaCppSection.style.display = isOllama ? 'none' : 'flex';
+		}
+		if (this._ollamaSection) {
+			this._ollamaSection.style.display = isOllama ? 'flex' : 'none';
+		}
+	}
+
+	private async _switchProvider(kind: ShiryuProviderKind): Promise<void> {
+		this._logService.info(`[ShiryuAI] Switching to provider: ${kind}`);
+		await this._shiryuAiService.switchProvider(kind);
+		this._refreshProviderVisibility();
+		this._refreshStatus();
+		this._refreshModelInfo();
+
+		if (kind === ShiryuProviderKind.Ollama) {
+			this._refreshOllamaModels();
+		}
+	}
+
+	private async _refreshOllamaModels(): Promise<void> {
+		if (!this._ollamaModelSelect) {
+			return;
+		}
+
+		// Clear existing options
+		while (this._ollamaModelSelect.options.length > 1) {
+			this._ollamaModelSelect.remove(1);
+		}
+
+		if (this._ollamaStatusText) {
+			this._ollamaStatusText.textContent = localize('ollamaChecking', 'Checking Ollama connection...');
+			this._ollamaStatusText.style.color = 'var(--vscode-descriptionForeground)';
+		}
+
+		try {
+			const models = await this._shiryuAiService.listModels();
+
+			if (models.length === 0) {
+				if (this._ollamaStatusText) {
+					this._ollamaStatusText.textContent = localize('ollamaNoModels', 'No models found. Download one below or run "ollama pull <model>" in terminal.');
+					this._ollamaStatusText.style.color = 'var(--vscode-warningForeground)';
+				}
+				return;
+			}
+
+			if (this._ollamaStatusText) {
+				this._ollamaStatusText.textContent = localize('ollamaModelsFound', '{0} model(s) available', models.length);
+				this._ollamaStatusText.style.color = 'var(--vscode-charts-green)';
+			}
+
+			for (const model of models) {
+				const opt = document.createElement('option');
+				opt.value = model;
+				opt.textContent = model;
+				this._ollamaModelSelect.appendChild(opt);
+			}
+		} catch (err) {
+			if (this._ollamaStatusText) {
+				this._ollamaStatusText.textContent = localize('ollamaError', 'Cannot connect to Ollama. Is it running?');
+				this._ollamaStatusText.style.color = 'var(--vscode-errorForeground)';
+			}
+		}
+	}
+
+	private async _pullOllamaModel(): Promise<void> {
+		const modelName = this._ollamaPullInput?.value.trim();
+		if (!modelName) {
+			return;
+		}
+
+		if (this._ollamaStatusText) {
+			this._ollamaStatusText.textContent = localize('ollamaPulling', 'Downloading {0}...', modelName);
+			this._ollamaStatusText.style.color = 'var(--vscode-charts-yellow)';
+		}
+
+		if (this._ollamaPullButton) {
+			(this._ollamaPullButton as HTMLElement).textContent = localize('downloading', 'Downloading...');
+			(this._ollamaPullButton as HTMLElement).style.opacity = '0.5';
+			(this._ollamaPullButton as HTMLElement).style.pointerEvents = 'none';
+		}
+
+		try {
+			// Access the Ollama provider through the service
+			// We need to use a method on the service to pull models
+			// For now, we'll use a simple approach
+			await this._ollamaPullDirect(modelName);
+
+			if (this._ollamaStatusText) {
+				this._ollamaStatusText.textContent = localize('ollamaPullComplete', 'Downloaded: {0}', modelName);
+				this._ollamaStatusText.style.color = 'var(--vscode-charts-green)';
+			}
+
+			// Refresh the model list
+			await this._refreshOllamaModels();
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : String(err);
+			if (this._ollamaStatusText) {
+				this._ollamaStatusText.textContent = localize('ollamaPullFailed', 'Download failed: {0}', errorMsg);
+				this._ollamaStatusText.style.color = 'var(--vscode-errorForeground)';
+			}
+		} finally {
+			if (this._ollamaPullButton) {
+				(this._ollamaPullButton as HTMLElement).textContent = localize('download', 'Download');
+				(this._ollamaPullButton as HTMLElement).style.opacity = '1';
+				(this._ollamaPullButton as HTMLElement).style.pointerEvents = 'auto';
+			}
+		}
+	}
+
+	private async _ollamaPullDirect(modelName: string): Promise<void> {
+		// Direct Ollama API call for pull
+		const baseUrl = 'http://localhost:11434';
+		const response = await fetch(`${baseUrl}/api/pull`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ name: modelName }),
+		});
+
+		if (!response.ok) {
+			throw new Error(`Ollama pull failed: ${response.status} ${response.statusText}`);
+		}
+
+		// Read the streaming response
+		const reader = response.body?.getReader();
+		if (reader) {
+			const decoder = new TextDecoder();
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) {
+					break;
+				}
+				const chunk = decoder.decode(value, { stream: true });
+				for (const line of chunk.split('\n')) {
+					if (line.trim()) {
+						try {
+							const progress = JSON.parse(line);
+							if (progress.status && this._ollamaStatusText) {
+								this._ollamaStatusText.textContent = progress.status;
+							}
+						} catch {
+							// ignore
+						}
+					}
+				}
+			}
+		}
+	}
+
+	private async _loadOllamaModel(): Promise<void> {
+		const selected = this._ollamaModelSelect?.value;
+		if (!selected) {
+			this._logService.warn('[ShiryuAI] No Ollama model selected');
+			return;
+		}
+
+		this._logService.info(`[ShiryuAI] Loading Ollama model: ${selected}`);
+
+		try {
+			await this._shiryuAiService.loadModel({
+				modelPath: selected,
+			});
+
+			this._refreshStatus();
+			this._refreshModelInfo();
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : String(err);
+			this._logService.error(`[ShiryuAI] Failed to load Ollama model: ${errorMsg}`);
+			if (this._ollamaStatusText) {
+				this._ollamaStatusText.textContent = localize('ollamaLoadFailed', 'Load failed: {0}', errorMsg);
+				this._ollamaStatusText.style.color = 'var(--vscode-errorForeground)';
+			}
+		}
+	}
+
 	private _refreshStatus(): void {
 		if (!this._statusText) {
 			return;
@@ -192,22 +519,23 @@ export class ShiryuAiModelManagerView extends ViewPane {
 
 		const isAvailable = this._shiryuAiService.isAvailable;
 		const isBusy = this._shiryuAiService.isBusy;
+		const provider = this._shiryuAiService.activeProvider;
+
+		const providerName = provider === ShiryuProviderKind.Ollama ? 'Ollama' : 'llama.cpp';
 
 		if (isBusy) {
-			this._statusText.textContent = localize('generating', 'Generating response...');
+			this._statusText.textContent = localize('generating', '{0} — Generating response...', providerName);
 			this._statusText.style.color = 'var(--vscode-charts-yellow)';
 		} else if (isAvailable) {
-			this._statusText.textContent = localize('loaded', 'Model loaded and ready');
+			const info = this._shiryuAiService.getModelInfo();
+			const modelName = info?.modelPath || 'unknown';
+			this._statusText.textContent = localize('loadedWithProvider', '{0} — {1} loaded', providerName, modelName);
 			this._statusText.style.color = 'var(--vscode-charts-green)';
 		} else {
-			this._statusText.textContent = localize('notLoaded', 'No model loaded');
+			this._statusText.textContent = localize('notLoadedWithProvider', '{0} — No model loaded', providerName);
 			this._statusText.style.color = 'var(--vscode-descriptionForeground)';
 		}
 
-		if (this._loadButton) {
-			(this._loadButton as HTMLElement).style.opacity = isAvailable ? '0.5' : '1';
-			(this._loadButton as HTMLElement).style.pointerEvents = isAvailable ? 'none' : 'auto';
-		}
 		if (this._unloadButton) {
 			(this._unloadButton as HTMLElement).style.opacity = isAvailable ? '1' : '0.5';
 			(this._unloadButton as HTMLElement).style.pointerEvents = isAvailable ? 'auto' : 'none';
@@ -238,16 +566,23 @@ export class ShiryuAiModelManagerView extends ViewPane {
 		title.textContent = localize('loadedModel', 'Loaded Model');
 		title.style.fontSize = '12px';
 
+		const providerLine = DOM.append(this._modelInfoContainer, $('div'));
+		providerLine.textContent = `${localize('provider', 'Provider')}: ${info.provider === ShiryuProviderKind.Ollama ? 'Ollama' : 'llama.cpp'}`;
+		providerLine.style.fontSize = '12px';
+		providerLine.style.color = 'var(--vscode-descriptionForeground)';
+
 		const pathLine = DOM.append(this._modelInfoContainer, $('div'));
-		pathLine.textContent = `${localize('path', 'Path')}: ${info.modelPath}`;
+		pathLine.textContent = `${localize('path', 'Model')}: ${info.modelPath}`;
 		pathLine.style.fontSize = '12px';
 		pathLine.style.wordBreak = 'break-all';
 		pathLine.style.color = 'var(--vscode-descriptionForeground)';
 
-		const contextLine = DOM.append(this._modelInfoContainer, $('div'));
-		contextLine.textContent = `${localize('contextSize', 'Context Size')}: ${info.contextSize.toLocaleString()} tokens`;
-		contextLine.style.fontSize = '12px';
-		contextLine.style.color = 'var(--vscode-descriptionForeground)';
+		if (info.contextSize > 0) {
+			const contextLine = DOM.append(this._modelInfoContainer, $('div'));
+			contextLine.textContent = `${localize('contextSize', 'Context Size')}: ${info.contextSize.toLocaleString()} tokens`;
+			contextLine.style.fontSize = '12px';
+			contextLine.style.color = 'var(--vscode-descriptionForeground)';
+		}
 	}
 
 	private async _browseForModel(): Promise<void> {

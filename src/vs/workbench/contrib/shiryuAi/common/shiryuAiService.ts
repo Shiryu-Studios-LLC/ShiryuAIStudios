@@ -7,10 +7,25 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 
+//#region Provider Types
+
+export enum ShiryuProviderKind {
+	LlamaCpp = 'llamaCpp',
+	Ollama = 'ollama',
+}
+
+export interface IShiryuProviderInfo {
+	kind: ShiryuProviderKind;
+	name: string;
+	isAvailable: boolean;
+}
+
+//#endregion
+
 //#region Configuration
 
 export interface IShiryuModelConfig {
-	/** Path to the GGUF model file */
+	/** Path to the GGUF model file (for llama.cpp) or model name (for Ollama) */
 	modelPath: string;
 	/** Context window size (default: 4096) */
 	contextSize?: number;
@@ -35,7 +50,10 @@ export const IShiryuAiService = createDecorator<IShiryuAiService>('shiryuAiServi
 export interface IShiryuAiService {
 	_serviceBrand: undefined;
 
-	/** Whether the llama.cpp backend is available */
+	/** Currently active provider */
+	readonly activeProvider: ShiryuProviderKind;
+
+	/** Whether a model backend is available */
 	readonly isAvailable: boolean;
 
 	/** Emitted when availability changes (e.g. model loaded/unloaded) */
@@ -47,7 +65,10 @@ export interface IShiryuAiService {
 	/** Whether the model is currently generating a response */
 	readonly isBusy: boolean;
 
-	/** Load a GGUF model. Resolves when model is ready. */
+	/** List available models from the active provider */
+	listModels(): Promise<string[]>;
+
+	/** Load a model. For llama.cpp: GGUF file path. For Ollama: model name. */
 	loadModel(config: IShiryuModelConfig): Promise<void>;
 
 	/** Unload the current model and free resources */
@@ -62,6 +83,12 @@ export interface IShiryuAiService {
 
 	/** Get the currently loaded model info, if any */
 	getModelInfo(): IShiryuModelInfo | undefined;
+
+	/** Switch to a different provider */
+	switchProvider(kind: ShiryuProviderKind): Promise<void>;
+
+	/** Get info about all available providers */
+	getProviders(): IShiryuProviderInfo[];
 }
 
 //#endregion
@@ -83,6 +110,7 @@ export interface IShiryuModelInfo {
 	modelPath: string;
 	contextSize: number;
 	isLoaded: boolean;
+	provider: ShiryuProviderKind;
 }
 
 //#endregion

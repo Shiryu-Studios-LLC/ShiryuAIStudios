@@ -458,6 +458,21 @@ configurationRegistry.registerConfiguration({
 			default: false,
 			description: 'Re-enable GitHub Copilot as a secondary AI provider. When disabled (default), only Shiryu AI is available. Restart required after changing.',
 		},
+		'shiryuAi.activeProvider': {
+			type: 'string',
+			default: 'llamaCpp',
+			enum: ['llamaCpp', 'ollama'],
+			enumDescriptions: [
+				'Use llama.cpp with local GGUF model files — fully offline, no dependencies.',
+				'Use Ollama for model management — auto-downloads models, supports 100+ models.',
+			],
+			description: 'Select the AI inference provider. llama.cpp requires GGUF files; Ollama manages models automatically.',
+		},
+		'shiryuAi.ollamaUrl': {
+			type: 'string',
+			default: 'http://localhost:11434',
+			description: 'URL of the Ollama server. Change if running Ollama on a different machine or port.',
+		},
 	},
 });
 
