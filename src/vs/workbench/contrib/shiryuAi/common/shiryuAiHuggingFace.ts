@@ -52,16 +52,16 @@ const HF_SEARCH_URL = `${HF_API_BASE}/models`;
 
 /** Default models to show when search is empty */
 const POPULAR_GGUF_MODELS = [
-	'TheBloke/Llama-2-7B-Chat-GGUF',
-	'TheBloke/CodeLlama-7B-Instruct-GGUF',
-	'TheBloke/Mistral-7B-Instruct-v0.2-GGUF',
-	'TheBloke/Phi-2-GGUF',
-	'TheBloke/Qwen2.5-7B-Instruct-GGUF',
-	'TheBloke/DeepSeek-Coder-6.7B-Instruct-GGUF',
+	'Qwen/Qwen2.5-VL-7B-Instruct-GGUF',
+	'lmstudio-community/Llama-3.2-11B-Vision-Instruct-GGUF',
+	'openbmb/MiniCPM-V-2_6-GGUF',
 	'bartowski/Qwen2.5-Coder-7B-Instruct-GGUF',
-	'bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF',
 	'lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF',
 	'lmstudio-community/Qwen2.5-7B-Instruct-GGUF',
+	'TheBloke/Mistral-7B-Instruct-v0.2-GGUF',
+	'TheBloke/CodeLlama-7B-Instruct-GGUF',
+	'TheBloke/DeepSeek-Coder-6.7B-Instruct-GGUF',
+	'bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF',
 ];
 
 export class HuggingFaceProvider extends Disposable {
