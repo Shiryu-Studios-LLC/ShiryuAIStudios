@@ -44,6 +44,8 @@ import { IUriIdentityService } from '../../../../../../platform/uriIdentity/comm
 import { GitHubPaths, IDefaultAccountService } from '../../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IUpdateService, StateType } from '../../../../../../platform/update/common/update.js';
 import { IWorkspaceTrustManagementService, IWorkspaceTrustRequestService } from '../../../../../../platform/workspace/common/workspaceTrust.js';
+import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { ChatConfiguration } from '../../../common/constants.js';
 
 function isVersionAtLeast(current: string, required: string): boolean {
 	const currentSemver = semver.coerce(current);
@@ -1054,6 +1056,7 @@ export class ModelPickerWidget extends Disposable {
 		@IWorkspaceTrustManagementService private readonly _workspaceTrustManagementService: IWorkspaceTrustManagementService,
 		@IWorkspaceTrustRequestService private readonly _workspaceTrustRequestService: IWorkspaceTrustRequestService,
 		@IStorageService private readonly _storageService: IStorageService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 	) {
 		super();
 		this._register(this._languageModelsService.onDidChangeLanguageModels(() => {
@@ -1154,6 +1157,10 @@ export class ModelPickerWidget extends Disposable {
 	}
 
 	private _requiresSetup(): boolean {
+		// Shiryu AI Studio: when AI features are disabled, never require Copilot setup
+		if (this._configurationService.getValue<boolean>(ChatConfiguration.AIDisabled) === true) {
+			return false;
+		}
 		const sentiment = this._entitlementService.sentiment;
 		return chatRequiresSetup({
 			completed: !!sentiment.completed,

@@ -87,6 +87,12 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 	) {
 		super();
 
+		// Shiryu AI Studio: skip the entire Copilot setup flow when AI features are disabled
+		if (this.configurationService.getValue<boolean>(ChatConfiguration.AIDisabled) === true) {
+			this.logService.info('[ShiryuAI] Copilot setup flow disabled (chat.disableAIFeatures = true). Shiryu AI is the active agent.');
+			return;
+		}
+
 		const context = chatEntitlementService.context?.value;
 		const requests = chatEntitlementService.requests?.value;
 		if (!context || !requests) {
@@ -818,6 +824,12 @@ export class ChatTeardownContribution extends Disposable implements IWorkbenchCo
 		this._register(this.extensionsWorkbenchService.onChange(e => {
 			if (e && !ExtensionIdentifier.equals(e.identifier.id, defaultChat.chatExtensionId)) {
 				return; // unrelated event
+			}
+
+			// Shiryu AI Studio: when shiryuAi.enableCopilot is false, don't let
+			// the Copilot extension override chat.disableAIFeatures back to false
+			if (this.configurationService.getValue<boolean>('shiryuAi.enableCopilot') === false) {
+				return;
 			}
 
 			const defaultChatExtension = this.extensionsWorkbenchService.local.find(value => ExtensionIdentifier.equals(value.identifier.id, defaultChat.chatExtensionId));

@@ -17,6 +17,13 @@ import { IShiryuAiService } from '../common/shiryuAiService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ChatConfiguration } from '../../chat/common/constants.js';
+import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
+import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { localize2 } from '../../../../nls.js';
+import { ViewPaneContainer } from '../../../browser/parts/views/viewPaneContainer.js';
+import { Extensions as ViewExtensions, IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainerLocation } from '../../../common/views.js';
+import { ShiryuAiModelManagerView } from './shiryuAiModelManagerView.js';
 
 //#region Agent Data
 
@@ -295,11 +302,12 @@ class ShiryuAiContribution extends Disposable {
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
+		this._registerAgent();
 	}
 
 	private _registered = false;
 
-	initialize(): void {
+	private _registerAgent(): void {
 		if (this._registered) {
 			return;
 		}
@@ -357,6 +365,53 @@ registerWorkbenchContribution2(
 	ShiryuAiContribution,
 	WorkbenchPhase.BlockRestore
 );
+
+//#region Model Manager View
+
+const shiryuAiModelManagerIcon = registerIcon(
+	'shiryu-ai-model-manager-icon',
+	Codicon.robot,
+	'Shiryu AI Model Manager view icon',
+);
+
+const MODEL_MANAGER_CONTAINER_ID = 'workbench.view.shiryuAiModelManagerContainer';
+const MODEL_MANAGER_VIEW_ID = ShiryuAiModelManagerView.ID;
+
+const viewContainersRegistry = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry);
+const viewsRegistry = Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry);
+
+const modelManagerContainer = viewContainersRegistry.registerViewContainer(
+	{
+		id: MODEL_MANAGER_CONTAINER_ID,
+		title: localize2('shiryuAiModelManager', 'Shiryu AI Models'),
+		icon: shiryuAiModelManagerIcon,
+		ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [
+			MODEL_MANAGER_CONTAINER_ID,
+			{ mergeViewWithContainerWhenSingleView: true },
+		]),
+		storageId: MODEL_MANAGER_CONTAINER_ID,
+		hideIfEmpty: true,
+		order: 2,
+	},
+	ViewContainerLocation.Sidebar,
+);
+
+const modelManagerViewDescriptor: IViewDescriptor = {
+	id: MODEL_MANAGER_VIEW_ID,
+	name: localize2('shiryuAiModelManagerView', 'Model Manager'),
+	containerIcon: shiryuAiModelManagerIcon,
+	ctorDescriptor: new SyncDescriptor(ShiryuAiModelManagerView),
+	canToggleVisibility: true,
+	canMoveView: true,
+	openCommandActionDescriptor: {
+		id: MODEL_MANAGER_VIEW_ID,
+		title: localize2('shiryuAiModelManager.focus', 'Focus Model Manager'),
+	},
+};
+
+viewsRegistry.registerViews([modelManagerViewDescriptor], modelManagerContainer);
+
+//#endregion
 
 //#region Configuration
 

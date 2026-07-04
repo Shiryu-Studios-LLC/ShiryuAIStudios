@@ -32,6 +32,11 @@ import { IRawChatParticipantContribution } from '../common/participants/chatPart
 import { ChatAgentLocation, ChatModeKind } from '../common/constants.js';
 import { ChatViewId, ChatViewContainerId } from './chat.js';
 import { ChatViewPane } from './widgetHosts/viewPane/chatViewPane.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ChatConfiguration } from '../common/constants.js';
+
+// --- Copilot extension ID to filter when AI features are disabled ---
+const COPILOT_EXTENSION_IDS = ['github.copilot', 'github.copilot-chat'];
 
 // --- Chat Container &  View Registration
 
@@ -45,7 +50,7 @@ const chatViewContainer: ViewContainer = Registry.as<IViewContainersRegistry>(Vi
 	storageId: ChatViewContainerId,
 	hideIfEmpty: true,
 	order: 1,
-}, ViewContainerLocation.AuxiliaryBar, { isDefault: true, doNotRegisterOpenCommand: true });
+}, ViewContainerLocation.Sidebar, { isDefault: true, doNotRegisterOpenCommand: true });
 
 const chatViewDescriptor: IViewDescriptor = {
 	id: ChatViewId,
@@ -220,6 +225,7 @@ export class ChatExtensionPointHandler implements IWorkbenchContribution {
 
 	constructor(
 		@IChatAgentService private readonly _chatAgentService: IChatAgentService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 	) {
 		this.handleAndRegisterChatExtensions();
 	}
@@ -227,6 +233,14 @@ export class ChatExtensionPointHandler implements IWorkbenchContribution {
 	private handleAndRegisterChatExtensions(): void {
 		chatParticipantExtensionPoint.setHandler((extensions, delta) => {
 			for (const extension of delta.added) {
+				// Shiryu AI Studio: skip Copilot chat participants when AI features are disabled
+				if (this._configurationService.getValue<boolean>(ChatConfiguration.AIDisabled) === true) {
+					const extId = extension.description.identifier.value.toLowerCase();
+					if (COPILOT_EXTENSION_IDS.some(id => extId.includes(id))) {
+						continue;
+					}
+				}
+
 				for (const providerDescriptor of extension.value) {
 					if (!providerDescriptor.name?.match(/^[\w-]+$/)) {
 						extension.collector.error(`Extension '${extension.description.identifier.value}' CANNOT register participant with invalid name: ${providerDescriptor.name}. Name must match /^[\\w-]+$/.`);
