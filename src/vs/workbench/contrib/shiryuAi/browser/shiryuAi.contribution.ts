@@ -670,7 +670,8 @@ configurationRegistry.registerConfiguration({
 		'shiryuAi.downloadDir': {
 			type: 'string',
 			default: '',
-			description: 'Directory to save downloaded GGUF models. Leave empty for default (~/.shiryu-ai-studio/models).',
+			description: '%shiryuAi.downloadDir.markdown%',
+			markdownDescription: 'Directory to save downloaded GGUF models. Leave empty for default (`~/.shiryu-ai-studio/models`).\n\n[Download Models from Hugging Face](command:workbench.view.shiryuAiChat.focus) — opens the Shiryu AI Chat panel where you can browse and download models.',
 		},
 		'shiryuAi.comfyuiUrl': {
 			type: 'string',

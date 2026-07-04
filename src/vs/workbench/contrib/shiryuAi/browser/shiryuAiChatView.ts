@@ -21,6 +21,7 @@ import { IViewDescriptorService } from '../../../common/views.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { URI } from '../../../../base/common/uri.js';
+import { IPathService } from '../../../services/path/common/pathService.js';
 import { IShiryuAiService } from '../common/shiryuAiService.js';
 import { HuggingFaceProvider } from '../common/shiryuAiHuggingFace.js';
 
@@ -59,6 +60,7 @@ export class ShiryuAiChatView extends ViewPane {
 		@IHoverService hoverService: IHoverService,
 		@IShiryuAiService private readonly _shiryuAiService: IShiryuAiService,
 		@IFileService private readonly _fileService: IFileService,
+		@IPathService private readonly _pathService: IPathService,
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super(options, keybindingService, contextMenuService, _configurationService,
@@ -268,7 +270,7 @@ export class ShiryuAiChatView extends ViewPane {
 	}
 
 	private async _scanModels(): Promise<ModelEntry[]> {
-		const dir = this._configurationService.getValue<string>('shiryuAi.downloadDir') || '~/.shiryu-ai-studio/models';
+		const dir = await this._getModelsDir();
 		const entries: ModelEntry[] = [];
 		try {
 			const stat = await this._fileService.resolve(URI.file(dir));
@@ -342,6 +344,13 @@ export class ShiryuAiChatView extends ViewPane {
 		return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 	}
 
+	private async _getModelsDir(): Promise<string> {
+		const configured = this._configurationService.getValue<string>('shiryuAi.downloadDir');
+		if (configured) { return configured; }
+		const home = await this._pathService.userHome();
+		return `${home.fsPath}\\.shiryu-ai-studio\\models`;
+	}
+
 	//#endregion
 
 	//#region HuggingFace Download
@@ -411,7 +420,7 @@ export class ShiryuAiChatView extends ViewPane {
 			// Pick smallest reasonable quant (Q4 or Q5)
 			const sorted = detail.ggufFiles.sort((a, b) => a.size - b.size);
 			const toDownload = sorted.find(f => f.path.includes('Q4_K_M') || f.path.includes('Q5_K_M')) || sorted[0];
-			const downloadDir = this._configurationService.getValue<string>('shiryuAi.downloadDir') || '~/.shiryu-ai-studio/models';
+			const downloadDir = await this._getModelsDir();
 			const dest = `${downloadDir}\\${toDownload.filename}`;
 
 			this._addMessage('system', `Downloading **${toDownload.filename}** (${this._hfProvider.formatSize(toDownload.size)})...`);
